@@ -1,5 +1,6 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -88,6 +89,7 @@ export default function AuthScreen() {
     setSubmitting(true);
     await new Promise((r) => setTimeout(r, 1400));
     setSubmitting(false);
+    router.replace("/(tabs)");
   };
 
   const inputBorderColor = (field: string, hasError: boolean) => {
