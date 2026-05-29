@@ -65,6 +65,9 @@ export default function AuthScreen() {
     [mode, fadeAnim],
   );
 
+  const MOCK_EMAIL = "asdf@asdf.com";
+  const MOCK_PASSWORD = "12341234";
+
   const validate = (): boolean => {
     const next: Record<string, string> = {};
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -72,6 +75,13 @@ export default function AuthScreen() {
     }
     if (password.length < 8) {
       next.password = "Password must be at least 8 characters.";
+    }
+    if (mode === "login") {
+      if (email === MOCK_EMAIL && password !== MOCK_PASSWORD) {
+        next.password = "Incorrect password.";
+      } else if (email !== MOCK_EMAIL && password.length >= 8) {
+        next.email = "No account found for this email.";
+      }
     }
     if (mode === "signup" && password !== confirmPassword) {
       next.confirmPassword = "Passwords don't match.";
@@ -87,7 +97,7 @@ export default function AuthScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 1400));
+    await new Promise((r) => setTimeout(r, 900));
     setSubmitting(false);
     router.replace("/(tabs)");
   };
