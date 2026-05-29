@@ -51,7 +51,7 @@ export function TerracottaWarm() {
         style={{ 
           backgroundColor: '#FFFBF5', 
           border: '1px solid #EBE3D5',
-          boxShadow: '0 10px 40px -10px rgba(194, 113, 79, 0.1), 0 1px 3px rgba(0,0,0,0.05)'
+          boxShadow: '0 10px 40px -10px rgba(125, 155, 118, 0.1), 0 1px 3px rgba(0,0,0,0.05)'
         }}
       >
         {/* Decorative noise/texture overlay could go here, simulating with a faint gradient */}
@@ -62,10 +62,10 @@ export function TerracottaWarm() {
 
         <div className="relative z-10">
           <div className="text-center mb-10">
-            <div className="flex justify-center items-center gap-2 mb-2 text-[#C2714F]">
-              <div className="h-[1px] w-8 bg-[#C2714F]/40"></div>
+            <div className="flex justify-center items-center gap-2 mb-2 text-[#7d9b76]">
+              <div className="h-[1px] w-8 bg-[#7d9b76]/40"></div>
               <Leaf size={16} strokeWidth={1.5} />
-              <div className="h-[1px] w-8 bg-[#C2714F]/40"></div>
+              <div className="h-[1px] w-8 bg-[#7d9b76]/40"></div>
             </div>
             <h1 className="text-4xl font-['Playfair_Display'] font-bold text-[#3D2C23] tracking-tight mb-2">
               Margin
@@ -89,7 +89,7 @@ export function TerracottaWarm() {
                     border: '1.5px solid #E3D5CA',
                     color: '#3D2C23'
                   }}
-                  onFocus={(e) => e.target.style.borderColor = '#C2714F'}
+                  onFocus={(e) => e.target.style.borderColor = '#7d9b76'}
                   onBlur={(e) => e.target.style.borderColor = '#E3D5CA'}
                 />
               </div>
@@ -110,7 +110,7 @@ export function TerracottaWarm() {
                   border: `1.5px solid ${errors.email ? '#D9534F' : '#E3D5CA'}`,
                   color: '#3D2C23'
                 }}
-                onFocus={(e) => { if (!errors.email) e.target.style.borderColor = '#C2714F'; }}
+                onFocus={(e) => { if (!errors.email) e.target.style.borderColor = '#7d9b76'; }}
                 onBlur={(e) => { if (!errors.email) e.target.style.borderColor = '#E3D5CA'; }}
               />
               {errors.email && <p className="text-xs text-[#D9534F] mt-1">{errors.email}</p>}
@@ -120,7 +120,7 @@ export function TerracottaWarm() {
               <div className="flex justify-between items-center">
                 <label className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#8A7366' }}>Password</label>
                 {isLogin && (
-                  <button type="button" className="text-xs font-medium hover:underline" style={{ color: '#C2714F' }}>
+                  <button type="button" className="text-xs font-medium hover:underline" style={{ color: '#7d9b76' }}>
                     Forgot password?
                   </button>
                 )}
@@ -139,13 +139,13 @@ export function TerracottaWarm() {
                     border: `1.5px solid ${errors.password ? '#D9534F' : '#E3D5CA'}`,
                     color: '#3D2C23'
                   }}
-                  onFocus={(e) => { if (!errors.password) e.target.style.borderColor = '#C2714F'; }}
+                  onFocus={(e) => { if (!errors.password) e.target.style.borderColor = '#7d9b76'; }}
                   onBlur={(e) => { if (!errors.password) e.target.style.borderColor = '#E3D5CA'; }}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#8A7366] hover:text-[#C2714F] transition-colors"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-[#8A7366] hover:text-[#7d9b76] transition-colors"
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
@@ -172,7 +172,7 @@ export function TerracottaWarm() {
                     border: `1.5px solid ${errors.confirmPassword ? '#D9534F' : '#E3D5CA'}`,
                     color: '#3D2C23'
                   }}
-                  onFocus={(e) => { if (!errors.confirmPassword) e.target.style.borderColor = '#C2714F'; }}
+                  onFocus={(e) => { if (!errors.confirmPassword) e.target.style.borderColor = '#7d9b76'; }}
                   onBlur={(e) => { if (!errors.confirmPassword) e.target.style.borderColor = '#E3D5CA'; }}
                 />
                 {errors.confirmPassword && <p className="text-xs text-[#D9534F] mt-1">{errors.confirmPassword}</p>}
@@ -183,7 +183,7 @@ export function TerracottaWarm() {
               type="submit"
               disabled={isLoading}
               className="w-full py-3.5 rounded-lg font-semibold text-white flex justify-center items-center transition-all mt-6 shadow-sm hover:shadow-md disabled:opacity-70 active:scale-[0.98]"
-              style={{ backgroundColor: '#C2714F' }}
+              style={{ backgroundColor: '#7d9b76' }}
             >
               {isLoading ? <Loader2 size={20} className="animate-spin" /> : (isLogin ? 'Log in' : 'Create account')}
             </button>
@@ -228,7 +228,7 @@ export function TerracottaWarm() {
                   setErrors({});
                 }}
                 className="font-semibold hover:underline transition-colors"
-                style={{ color: '#C2714F' }}
+                style={{ color: '#7d9b76' }}
               >
                 {isLogin ? 'Sign up' : 'Log in'}
               </button>
