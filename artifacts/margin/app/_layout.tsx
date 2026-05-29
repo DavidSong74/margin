@@ -45,7 +45,11 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
+    if (fontsLoaded) {
+      console.log("[fonts] loaded OK");
+      SplashScreen.hideAsync();
+    } else if (fontError) {
+      console.log("[fonts] ERROR:", fontError?.message);
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
