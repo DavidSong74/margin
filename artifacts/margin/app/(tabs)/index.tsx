@@ -325,20 +325,6 @@ export default function LibraryScreen() {
           Margin
         </Text>
         <View style={styles.topActions}>
-          {/* Dev toggle — swap populated ↔ empty */}
-          <TouchableOpacity
-            style={[styles.iconBtn, { backgroundColor: colors.muted }]}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setJournals((j) => (j.length > 0 ? [] : MOCK_JOURNALS));
-            }}
-          >
-            <Feather
-              name={isEmpty ? "grid" : "layers"}
-              size={16}
-              color={colors.mutedForeground}
-            />
-          </TouchableOpacity>
           {/* Avatar */}
           <TouchableOpacity
             style={[styles.avatar, { backgroundColor: colors.primary }]}
