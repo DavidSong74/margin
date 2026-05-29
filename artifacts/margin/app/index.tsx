@@ -585,6 +585,26 @@ export default function AuthScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+
+            {/* Dev-only bypass */}
+            <TouchableOpacity
+              onPress={() => router.replace("/(tabs)")}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.devSkipBtn}
+              testID="btn-dev-skip"
+            >
+              <Text
+                style={[
+                  styles.devSkipText,
+                  {
+                    color: colors.mutedForeground,
+                    fontFamily: "Inter_400Regular",
+                  },
+                ]}
+              >
+                Skip login (dev only)
+              </Text>
+            </TouchableOpacity>
           </Animated.View>
         </View>
       </KeyboardAwareScrollViewCompat>
@@ -727,4 +747,13 @@ const styles = StyleSheet.create({
   },
   toggleLabel: { fontSize: 14 },
   toggleLink: { fontSize: 14 },
+  devSkipBtn: {
+    alignItems: "center",
+    marginTop: 16,
+  },
+  devSkipText: {
+    fontSize: 12,
+    opacity: 0.5,
+    letterSpacing: 0.1,
+  },
 });
