@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
 import React, { useState } from "react";
 import {
   FlatList,
@@ -271,7 +272,13 @@ export default function LibraryScreen() {
           <TouchableOpacity
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              console.log("Open journal:", item.journal.title);
+              router.push({
+                pathname: "/journal/[id]",
+                params: {
+                  id: item.journal.id,
+                  title: item.journal.title,
+                },
+              });
             }}
             activeOpacity={0.82}
           >
