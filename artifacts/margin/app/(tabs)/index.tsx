@@ -2,7 +2,6 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
 import {
-  Dimensions,
   FlatList,
   Image,
   Platform,
@@ -11,18 +10,17 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
 
-const { width: SCREEN_W } = Dimensions.get("window");
 const H_PAD = 20;
 const COL_GAP = 12;
-const CARD_W = (SCREEN_W - H_PAD * 2 - COL_GAP) / 2;
-const CARD_H = CARD_W * 1.42;
 const SPINE_W = 9;
 const TAB_BAR_H = 84;
+const MAX_CONTENT_W = 430;
 
 type CoverStyle = "solid" | "image";
 
@@ -35,8 +33,6 @@ interface Journal {
   pageCount: number;
   lastEdited: string;
 }
-
-const COVER_COLORS = ["#c8b89a", "#a8b8a0", "#b8a8c0", "#b8c4b0", "#c0a898", "#a8b0b8"];
 
 const MOCK_JOURNALS: Journal[] = [
   {
@@ -91,19 +87,34 @@ const MOCK_JOURNALS: Journal[] = [
 
 type GridItem = { type: "new" } | { type: "journal"; journal: Journal };
 
-function JournalCover({ journal }: { journal: Journal }) {
+interface CardDims {
+  cardW: number;
+  cardH: number;
+}
+
+function JournalCover({
+  journal,
+  cardW,
+  cardH,
+}: { journal: Journal } & CardDims) {
   const colors = useColors();
   const isImage = journal.coverStyle === "image";
+
+  const webShadow =
+    Platform.OS === "web"
+      ? { boxShadow: "2px 6px 18px rgba(74, 63, 53, 0.18)" }
+      : {};
 
   return (
     <View
       style={[
         styles.coverOuter,
+        webShadow,
         {
-          width: CARD_W,
-          height: CARD_H,
+          width: cardW,
+          height: cardH,
           backgroundColor: journal.coverColor ?? colors.card,
-          borderColor: "rgba(0,0,0,0.06)",
+          borderColor: "rgba(0,0,0,0.07)",
         },
       ]}
     >
@@ -118,11 +129,11 @@ function JournalCover({ journal }: { journal: Journal }) {
         </>
       ) : null}
 
-      {/* Spine binding */}
+      {/* Book spine */}
       <View style={styles.spine} />
 
-      {/* Title centered */}
-      <View style={styles.coverTitleWrap}>
+      {/* Title */}
+      <View style={[styles.coverTitleWrap, { left: SPINE_W + 10 }]}>
         <Text
           style={[
             styles.coverTitle,
@@ -140,17 +151,16 @@ function JournalCover({ journal }: { journal: Journal }) {
   );
 }
 
-function NewJournalTile() {
+function NewJournalTile({ cardW, cardH }: CardDims) {
   const colors = useColors();
   return (
     <View
       style={[
         styles.newTile,
         {
-          width: CARD_W,
-          height: CARD_H,
+          width: cardW,
+          height: cardH,
           borderColor: colors.primary,
-          backgroundColor: "transparent",
         },
       ]}
     >
@@ -186,7 +196,10 @@ function EmptyState() {
       <Text
         style={[
           styles.emptyTitle,
-          { color: colors.foreground, fontFamily: "PlayfairDisplay_600SemiBold" },
+          {
+            color: colors.foreground,
+            fontFamily: "PlayfairDisplay_600SemiBold",
+          },
         ]}
       >
         Your shelf is empty
@@ -218,13 +231,21 @@ function EmptyState() {
 export default function LibraryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { width: rawW } = useWindowDimensions();
+
+  // On web the window can be very wide; cap to mobile-width content
+  const effectiveW =
+    Platform.OS === "web" ? Math.min(rawW, MAX_CONTENT_W) : rawW;
+  const cardW = (effectiveW - H_PAD * 2 - COL_GAP) / 2;
+  const cardH = cardW * 1.42;
 
   const [journals, setJournals] = useState<Journal[]>(MOCK_JOURNALS);
   const [searchText, setSearchText] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
 
   const pt = Platform.OS === "web" ? 67 : insets.top;
-  const pb = Platform.OS === "web" ? 34 + TAB_BAR_H : insets.bottom + TAB_BAR_H;
+  const pb =
+    Platform.OS === "web" ? 34 + TAB_BAR_H : insets.bottom + TAB_BAR_H;
 
   const gridData: GridItem[] = [
     { type: "new" },
@@ -233,13 +254,9 @@ export default function LibraryScreen() {
 
   const isEmpty = journals.length === 0;
 
-  function renderItem({ item, index }: { item: GridItem; index: number }) {
-    const isLeftCol = index % 2 === 0;
-    const marginLeft = isLeftCol ? 0 : COL_GAP / 2;
-    const marginRight = isLeftCol ? COL_GAP / 2 : 0;
-
+  function renderItem({ item }: { item: GridItem }) {
     return (
-      <View style={{ marginLeft, marginRight, marginBottom: COL_GAP }}>
+      <View style={{ marginBottom: COL_GAP }}>
         {item.type === "new" ? (
           <TouchableOpacity
             onPress={() => {
@@ -248,7 +265,7 @@ export default function LibraryScreen() {
             }}
             activeOpacity={0.7}
           >
-            <NewJournalTile />
+            <NewJournalTile cardW={cardW} cardH={cardH} />
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -258,11 +275,18 @@ export default function LibraryScreen() {
             }}
             activeOpacity={0.82}
           >
-            <JournalCover journal={item.journal} />
+            <JournalCover
+              journal={item.journal}
+              cardW={cardW}
+              cardH={cardH}
+            />
             <Text
               style={[
                 styles.journalName,
-                { color: colors.foreground, fontFamily: "Inter_600SemiBold" },
+                {
+                  color: colors.foreground,
+                  fontFamily: "Inter_600SemiBold",
+                },
               ]}
               numberOfLines={1}
             >
@@ -271,7 +295,10 @@ export default function LibraryScreen() {
             <Text
               style={[
                 styles.journalMeta,
-                { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+                {
+                  color: colors.mutedForeground,
+                  fontFamily: "Inter_400Regular",
+                },
               ]}
             >
               {item.journal.pageCount} pages · {item.journal.lastEdited}
@@ -289,13 +316,16 @@ export default function LibraryScreen() {
         <Text
           style={[
             styles.topWordmark,
-            { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" },
+            {
+              color: colors.foreground,
+              fontFamily: "PlayfairDisplay_700Bold",
+            },
           ]}
         >
           Margin
         </Text>
         <View style={styles.topActions}>
-          {/* Dev toggle — swap between populated and empty */}
+          {/* Dev toggle — swap populated ↔ empty */}
           <TouchableOpacity
             style={[styles.iconBtn, { backgroundColor: colors.muted }]}
             onPress={() => {
@@ -318,7 +348,10 @@ export default function LibraryScreen() {
             }}
           >
             <Text
-              style={[styles.avatarInitial, { fontFamily: "Inter_600SemiBold" }]}
+              style={[
+                styles.avatarInitial,
+                { fontFamily: "Inter_600SemiBold" },
+              ]}
             >
               S
             </Text>
@@ -331,7 +364,10 @@ export default function LibraryScreen() {
         <Text
           style={[
             styles.greeting,
-            { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" },
+            {
+              color: colors.foreground,
+              fontFamily: "PlayfairDisplay_700Bold",
+            },
           ]}
         >
           Your shelf
@@ -379,12 +415,14 @@ export default function LibraryScreen() {
         />
       </View>
 
-      {/* Grid heading */}
       {!isEmpty && (
         <Text
           style={[
             styles.sectionLabel,
-            { color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
+            {
+              color: colors.mutedForeground,
+              fontFamily: "Inter_500Medium",
+            },
           ]}
         >
           All journals
@@ -406,7 +444,7 @@ export default function LibraryScreen() {
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <FlatList
         data={gridData}
-        keyExtractor={(item, i) =>
+        keyExtractor={(item) =>
           item.type === "new" ? "new" : item.journal.id
         }
         renderItem={renderItem}
@@ -416,9 +454,8 @@ export default function LibraryScreen() {
           styles.gridContent,
           { paddingBottom: pb },
         ]}
-        showsVerticalScrollIndicator={false}
-        scrollEnabled={true}
         columnWrapperStyle={styles.columnWrapper}
+        showsVerticalScrollIndicator={false}
       />
     </View>
   );
@@ -427,7 +464,6 @@ export default function LibraryScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
 
-  /* Top bar */
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -435,10 +471,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: H_PAD,
     paddingBottom: 12,
   },
-  topWordmark: {
-    fontSize: 22,
-    letterSpacing: -0.3,
-  },
+  topWordmark: { fontSize: 22, letterSpacing: -0.3 },
   topActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -458,28 +491,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarInitial: {
-    color: "#fff",
-    fontSize: 15,
-  },
+  avatarInitial: { color: "#fff", fontSize: 15 },
 
-  /* Greeting */
   greetingWrap: {
     paddingHorizontal: H_PAD,
     paddingBottom: 16,
   },
-  greeting: {
-    fontSize: 30,
-    letterSpacing: -0.5,
-    lineHeight: 34,
-  },
-  greetingSub: {
-    fontSize: 14,
-    marginTop: 3,
-    opacity: 0.75,
-  },
+  greeting: { fontSize: 30, letterSpacing: -0.5, lineHeight: 34 },
+  greetingSub: { fontSize: 14, marginTop: 3, opacity: 0.75 },
 
-  /* Search */
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -491,11 +511,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     gap: 10,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    height: 48,
-  },
+  searchInput: { flex: 1, fontSize: 15, height: 48 },
 
   sectionLabel: {
     paddingHorizontal: H_PAD,
@@ -505,19 +521,14 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
 
-  /* Grid */
-  gridContent: {
-    paddingHorizontal: H_PAD,
-  },
-  columnWrapper: {
-    justifyContent: "space-between",
-  },
+  gridContent: { paddingHorizontal: H_PAD },
+  columnWrapper: { justifyContent: "space-between", marginBottom: 0 },
 
-  /* Cover card */
   coverOuter: {
     borderRadius: 10,
     overflow: "hidden",
     borderWidth: 1,
+    // Native shadows
     shadowColor: "#4a3f35",
     shadowOffset: { width: 2, height: 6 },
     shadowOpacity: 0.18,
@@ -540,7 +551,6 @@ const styles = StyleSheet.create({
   },
   coverTitleWrap: {
     position: "absolute",
-    left: SPINE_W + 10,
     right: 10,
     bottom: 14,
     zIndex: 3,
@@ -551,7 +561,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.1,
   },
 
-  /* New journal tile */
   newTile: {
     borderRadius: 10,
     borderWidth: 1.5,
@@ -567,24 +576,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  newTileText: {
-    fontSize: 13,
-  },
+  newTileText: { fontSize: 13 },
 
-  /* Journal metadata below cover */
-  journalName: {
-    fontSize: 13,
-    marginTop: 8,
-    marginLeft: 2,
-  },
-  journalMeta: {
-    fontSize: 11,
-    marginTop: 2,
-    marginLeft: 2,
-    opacity: 0.8,
-  },
+  journalName: { fontSize: 13, marginTop: 8, marginLeft: 2 },
+  journalMeta: { fontSize: 11, marginTop: 2, marginLeft: 2, opacity: 0.8 },
 
-  /* Empty state */
   emptyWrap: {
     flex: 1,
     alignItems: "center",
@@ -621,8 +617,5 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 8,
   },
-  emptyBtnText: {
-    color: "#fff",
-    fontSize: 15,
-  },
+  emptyBtnText: { color: "#fff", fontSize: 15 },
 });
