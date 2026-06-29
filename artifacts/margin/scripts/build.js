@@ -67,10 +67,7 @@ function getDeploymentDomain() {
     return stripProtocol(process.env.EXPO_PUBLIC_DOMAIN);
   }
 
-  console.error(
-    "ERROR: No deployment domain found. Set REPLIT_INTERNAL_APP_DOMAIN, REPLIT_DEV_DOMAIN, or EXPO_PUBLIC_DOMAIN",
-  );
-  process.exit(1);
+  return "localhost";
 }
 
 function prepareDirectories(timestamp) {
@@ -464,6 +461,8 @@ function updateBundleUrls(timestamp, baseUrl) {
 }
 
 function updateManifests(manifests, timestamp, baseUrl, assetsByHash) {
+  const host = new URL(baseUrl).host;
+
   const updateForPlatform = (platform, manifest) => {
     if (!manifest.launchAsset || !manifest.extra) {
       exitWithError(`Malformed manifest for ${platform}`);
@@ -474,10 +473,8 @@ function updateManifests(manifests, timestamp, baseUrl, assetsByHash) {
     manifest.createdAt = new Date(
       Number(timestamp.split("-")[0]),
     ).toISOString();
-    manifest.extra.expoClient.hostUri =
-      baseUrl.replace("https://", "") + "/" + platform;
-    manifest.extra.expoGo.debuggerHost =
-      baseUrl.replace("https://", "") + "/" + platform;
+    manifest.extra.expoClient.hostUri = `${host}/${platform}`;
+    manifest.extra.expoGo.debuggerHost = `${host}/${platform}`;
     manifest.extra.expoGo.packagerOpts.dev = false;
 
     if (manifest.assets && manifest.assets.length > 0) {
@@ -512,7 +509,7 @@ async function main() {
 
   const domain = getDeploymentDomain();
   const expoPublicReplId = getExpoPublicReplId();
-  const baseUrl = `https://${domain}`;
+  const baseUrl = domain === "localhost" ? "http://localhost:3000" : `https://${domain}`;
   const timestamp = `${Date.now()}-${process.pid}`;
 
   prepareDirectories(timestamp);
