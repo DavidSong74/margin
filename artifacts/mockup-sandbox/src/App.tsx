@@ -97,21 +97,32 @@ function getPreviewExamplePath(): string {
 }
 
 function Gallery() {
+  const basePath = getBasePath();
+  const componentPaths = Object.keys(modules).map((key) =>
+    key.replace("./components/mockups/", "").replace(".tsx", ""),
+  );
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-8">
       <div className="text-center max-w-md">
         <h1 className="text-2xl font-semibold text-gray-900 mb-3">
           Component Preview Server
         </h1>
-        <p className="text-gray-500 mb-4">
-          This server renders individual components for the workspace canvas.
+        <p className="text-gray-500 mb-6">
+          Select a component to preview:
         </p>
-        <p className="text-sm text-gray-400">
-          Access component previews at{" "}
-          <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-            {getPreviewExamplePath()}
-          </code>
-        </p>
+        <div className="flex flex-col gap-2">
+          {componentPaths.map((path) => (
+            <a
+              key={path}
+              href={`${basePath}/preview/${path}`}
+              className="px-4 py-3 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors text-left"
+            >
+              {path.split("/").pop()}
+              <span className="text-gray-400 ml-2 text-xs">{path}</span>
+            </a>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -130,13 +141,34 @@ function getPreviewPath(): string | null {
 
 function App() {
   const previewPath = getPreviewPath();
+  const basePath = getBasePath();
 
   if (previewPath) {
     return (
-      <PreviewRenderer
-        componentPath={previewPath}
-        modules={discoveredModules}
-      />
+      <>
+        <a
+          href={basePath || "/"}
+          style={{
+            position: "fixed",
+            top: 12,
+            left: 12,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.55)",
+            color: "#fff",
+            fontSize: 12,
+            padding: "4px 10px",
+            borderRadius: 6,
+            textDecoration: "none",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          ← Gallery
+        </a>
+        <PreviewRenderer
+          componentPath={previewPath}
+          modules={discoveredModules}
+        />
+      </>
     );
   }
 
