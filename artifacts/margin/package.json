@@ -56,5 +56,7 @@
     "zod": "catalog:",
     "zod-validation-error": "^3.4.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.8"
+  }
 }
