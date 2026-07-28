@@ -546,6 +546,164 @@ The Review tab says "Resurface past entries and rediscover your memories" — th
 
 ---
 
+## 11. Profile tab — wire real user data, sign-out, and settings persistence
+
+### What and why
+The Profile tab is visually complete but functionally hollow. Three things make it a dead end right now: the user's name and email are hardcoded strings, the "Sign out" button has no `onPress` handler (tapping it does nothing), and every toggle or preference the user changes resets the moment they leave the tab. This section wires those three things to real infrastructure. It does not build new features — notifications, iCloud backup, Google Drive backup, and App Lock are all placeholder rows that belong in the deferred section. This is purely about making what already exists on screen actually work.
+
+### Things to watch out for
+
+- **`supabase.auth.getUser()` makes a network round-trip; `supabase.auth.getSession()` does not.** Prefer `getSession()` in the Profile screen to read the already-cached session. `getSession()` returns `{ data: { session }, error }` where `session.user` has `email`, `id`, and `user_metadata`. Only call `getUser()` if you need server-verified identity (not needed here).
+- **`user_metadata.full_name` is only set if the user completed an OAuth flow that provided it** (e.g. Google). For email/password signups, `user_metadata` is empty. Always fall back gracefully: derive a display name from the email prefix (`email.split('@')[0]`) rather than showing `undefined` or crashing on a null access.
+- **The avatar initial must be derived from the display name, not hardcoded.** Use the first character of `displayName.charAt(0).toUpperCase()`. If the display name is the email prefix (e.g. `d.song`), the initial is `D`.
+- **Sign-out must clear local state before navigating.** Call `supabase.auth.signOut()` and then navigate to `/`. Do not navigate first and sign out second — if the navigation triggers a query on the destination screen before the session is cleared, you will get a brief authenticated flash or a race condition.
+- **Confirm before signing out.** Signing out is non-trivial: the user loses their session and must re-authenticate. Use `Alert.alert` with "Sign out" and "Cancel" buttons. If the user confirms, call `signOut()`. This is a one-line change that prevents a frustrating accidental sign-out.
+- **Settings should be persisted with a single AsyncStorage key**, not one key per setting. Serialize all user preferences as a single JSON object under the key `"margin:settings"`. Read it once on mount, write the whole object back on any change. Do not scatter individual keys like `"margin:theme"`, `"margin:dailyReminder"` etc. — a single key is easier to reset (one delete), easier to migrate (one version field), and reads atomically.
+- **Read preferences before rendering to avoid a flash of wrong state.** If you initialize `theme` to `"system"` as the default and then immediately overwrite it from AsyncStorage, the UI will render "system" for one frame, then snap to "dark". Use a `prefsLoaded` boolean. While `prefsLoaded` is false, render nothing (or a loading indicator) instead of the incorrect defaults.
+- **AsyncStorage is async; the initial state must come from a `useEffect` load, not from the `useState` initializer.** You cannot do `useState(await AsyncStorage.getItem(...))` because `useState` is synchronous. Use `useState` with a sensible default, then `useEffect(() => { loadPrefs(); }, [])` to overwrite with the stored value.
+- **The "Sign out" Row component passes `onPress` as a prop.** Looking at the existing component, `Row` already accepts an `onPress` prop. The only thing missing is passing a real handler. Do not restructure the component — just pass the handler.
+- **Storage numbers are hardcoded mock values (2.4 GB / 15 GB).** Supabase does not expose per-user storage usage through the JS client SDK. Querying real usage would require a custom Edge Function or a Supabase admin API call with the service role key — both are significantly more work than the value they provide. Leave the mock values in place and do not attempt to wire them to real data in this section.
+
+### Must be done
+- The profile header shows the real user's display name (from `user_metadata.full_name`, falling back to the email prefix) and email, fetched from `supabase.auth.getSession()` on mount.
+- The avatar circle shows the correct first initial of the display name, not the hardcoded `"S"`.
+- The "Sign out" Row has an `onPress` that shows `Alert.alert` with Confirm and Cancel options. On confirm, calls `supabase.auth.signOut()` then `router.replace("/")`.
+- All toggle states and the theme/cover-color selection are loaded from AsyncStorage on mount and written back to AsyncStorage on every change.
+- A `prefsLoaded` boolean gates rendering so default values never flash before the stored values are applied.
+
+### Double-check before moving on
+- [ ] Open the Profile tab → the header shows your real email and a name derived from it (not "Sarah" / "asdf@asdf.com").
+- [ ] The avatar circle shows the correct first initial.
+- [ ] Tap "Sign out" → an alert appears asking for confirmation.
+- [ ] Tap "Cancel" in the alert → nothing happens, session is still active.
+- [ ] Tap "Sign out" then confirm → app navigates to the auth screen. Re-opening the app shows the sign-in screen, not the app (session is truly cleared).
+- [ ] Toggle "Daily writing reminder" to off, leave the tab, return → the toggle is still off (preference was persisted).
+- [ ] Change the theme to "Dark", leave the tab, return → "Dark" is still selected.
+- [ ] Force-quit and relaunch the app → all preferences are still as the user left them.
+
+### Step-by-step workflow
+1. At the top of `ProfileScreen`, fetch the session on mount:
+   ```ts
+   const [userEmail, setUserEmail] = useState<string>("");
+   const [displayName, setDisplayName] = useState<string>("");
+
+   useEffect(() => {
+     supabase.auth.getSession().then(({ data: { session } }) => {
+       if (!session) return;
+       const email = session.user.email ?? "";
+       const name =
+         (session.user.user_metadata?.full_name as string | undefined) ??
+         email.split("@")[0];
+       setUserEmail(email);
+       setDisplayName(name);
+     });
+   }, []);
+   ```
+   Replace the hardcoded `"Sarah"` / `"asdf@asdf.com"` strings in the JSX with `displayName` and `userEmail`. Replace the hardcoded `"S"` avatar initial with `displayName.charAt(0).toUpperCase() || "?"`.
+
+2. Add the preferences load/save pattern. Define a type for the preferences object:
+   ```ts
+   const PREFS_KEY = "margin:settings";
+
+   type Prefs = {
+     dailyReminder: boolean;
+     onThisDay: boolean;
+     weeklyDigest: boolean;
+     iCloudBackup: boolean;
+     driveBackup: boolean;
+     appLock: boolean;
+     theme: ThemeOption;
+     coverColor: string;
+   };
+
+   const DEFAULT_PREFS: Prefs = {
+     dailyReminder: true,
+     onThisDay: true,
+     weeklyDigest: false,
+     iCloudBackup: true,
+     driveBackup: false,
+     appLock: false,
+     theme: "system",
+     coverColor: COVER_COLORS[0],
+   };
+   ```
+   Initialize each piece of state to its default value, then add a `prefsLoaded` state (default `false`). In a `useEffect` on mount, read the stored prefs:
+   ```ts
+   useEffect(() => {
+     AsyncStorage.getItem(PREFS_KEY).then((raw) => {
+       if (raw) {
+         const stored: Partial<Prefs> = JSON.parse(raw);
+         setDailyReminder(stored.dailyReminder ?? DEFAULT_PREFS.dailyReminder);
+         setOnThisDay(stored.onThisDay ?? DEFAULT_PREFS.onThisDay);
+         setWeeklyDigest(stored.weeklyDigest ?? DEFAULT_PREFS.weeklyDigest);
+         setICloudBackup(stored.iCloudBackup ?? DEFAULT_PREFS.iCloudBackup);
+         setDriveBackup(stored.driveBackup ?? DEFAULT_PREFS.driveBackup);
+         setAppLock(stored.appLock ?? DEFAULT_PREFS.appLock);
+         setTheme(stored.theme ?? DEFAULT_PREFS.theme);
+         setCoverColor(stored.coverColor ?? DEFAULT_PREFS.coverColor);
+       }
+       setPrefsLoaded(true);
+     });
+   }, []);
+   ```
+   Add a helper function `savePrefs(patch: Partial<Prefs>)` that reads the current in-memory prefs, merges the patch, and writes the merged object back to AsyncStorage. Call it inside every `onChange` handler instead of just calling the setter:
+   ```ts
+   function savePref(patch: Partial<Prefs>) {
+     const current: Prefs = {
+       dailyReminder, onThisDay, weeklyDigest,
+       iCloudBackup, driveBackup, appLock, theme, coverColor,
+     };
+     AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...patch }));
+   }
+
+   // Example toggle usage:
+   <ToggleRow
+     icon="bell"
+     label="Daily writing reminder"
+     value={dailyReminder}
+     onChange={(v) => { setDailyReminder(v); savePref({ dailyReminder: v }); }}
+   />
+   ```
+   If `!prefsLoaded`, return `null` at the top of the render function (before the `ScrollView`) to suppress the initial flash.
+
+3. Wire the sign-out button. In the "Account" `SectionCard`, update the Sign out `Row`:
+   ```tsx
+   <Row
+     icon="log-out"
+     label="Sign out"
+     destructive
+     chevron={false}
+     last
+     onPress={() => {
+       Alert.alert(
+         "Sign out",
+         "You'll need to sign in again to access your journals.",
+         [
+           { text: "Cancel", style: "cancel" },
+           {
+             text: "Sign out",
+             style: "destructive",
+             onPress: async () => {
+               await supabase.auth.signOut();
+               router.replace("/");
+             },
+           },
+         ]
+       );
+     }}
+   />
+   ```
+   Import `Alert` from `react-native` and `router` from `expo-router` at the top of the file. `supabase` is already available in the project at `@/lib/supabase`.
+
+4. Add the `AsyncStorage` import. It is already installed in the project (used by `lib/supabase.ts` for session persistence). Import it at the top of the Profile screen:
+   ```ts
+   import AsyncStorage from "@react-native-async-storage/async-storage";
+   ```
+
+5. Commit: "Wire Profile tab: real user identity, sign-out with confirmation, persisted preferences."
+
+---
+
 ## Deferred features — do not build yet
 
 **Async transcription queue.** A `transcription_status` column on `pages` is already sufficient to model retries. Add a real queue (Redis, Supabase Queues, or BullMQ) only when Gemini 429 rate limits become a measured problem, not in anticipation of one.

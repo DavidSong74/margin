@@ -14,9 +14,20 @@
       "backgroundColor": "#faf7f2"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Margin needs camera access to photograph your journal pages.",
+        "NSPhotoLibraryUsageDescription": "Margin needs photo library access to select journal cover images.",
+        "NSPhotoLibraryAddUsageDescription": "Margin saves captured journal pages to your photo library."
+      }
     },
-    "android": {},
+    "android": {
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
@@ -28,7 +39,8 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-camera"
     ],
     "experiments": {
       "typedRoutes": true,

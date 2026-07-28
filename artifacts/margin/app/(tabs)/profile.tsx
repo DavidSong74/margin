@@ -1,7 +1,10 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useState } from "react";
+import { router } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
+  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -13,6 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
+import { supabase } from "@/lib/supabase";
 
 // ─── Reusable primitives ─────────────────────────────────────────────────────
 
@@ -386,6 +390,32 @@ function StorageRow() {
   );
 }
 
+// ─── Preferences ─────────────────────────────────────────────────────────────
+
+const PREFS_KEY = "margin:settings";
+
+type Prefs = {
+  dailyReminder: boolean;
+  onThisDay: boolean;
+  weeklyDigest: boolean;
+  iCloudBackup: boolean;
+  driveBackup: boolean;
+  appLock: boolean;
+  theme: ThemeOption;
+  coverColor: string;
+};
+
+const DEFAULT_PREFS: Prefs = {
+  dailyReminder: true,
+  onThisDay: true,
+  weeklyDigest: false,
+  iCloudBackup: true,
+  driveBackup: false,
+  appLock: false,
+  theme: "system",
+  coverColor: COVER_COLORS[0],
+};
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
@@ -395,14 +425,79 @@ export default function ProfileScreen() {
   const pt = Platform.OS === "web" ? 67 : insets.top;
   const pb = Platform.OS === "web" ? 34 + 84 : insets.bottom + 84;
 
-  const [dailyReminder, setDailyReminder] = useState(true);
-  const [onThisDay, setOnThisDay] = useState(true);
-  const [weeklyDigest, setWeeklyDigest] = useState(false);
-  const [iCloudBackup, setICloudBackup] = useState(true);
-  const [driveBackup, setDriveBackup] = useState(false);
-  const [appLock, setAppLock] = useState(false);
-  const [theme, setTheme] = useState<ThemeOption>("system");
-  const [coverColor, setCoverColor] = useState(COVER_COLORS[0]);
+  // User identity
+  const [userEmail, setUserEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+
+  // Preferences
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [dailyReminder, setDailyReminder] = useState(DEFAULT_PREFS.dailyReminder);
+  const [onThisDay, setOnThisDay] = useState(DEFAULT_PREFS.onThisDay);
+  const [weeklyDigest, setWeeklyDigest] = useState(DEFAULT_PREFS.weeklyDigest);
+  const [iCloudBackup, setICloudBackup] = useState(DEFAULT_PREFS.iCloudBackup);
+  const [driveBackup, setDriveBackup] = useState(DEFAULT_PREFS.driveBackup);
+  const [appLock, setAppLock] = useState(DEFAULT_PREFS.appLock);
+  const [theme, setTheme] = useState<ThemeOption>(DEFAULT_PREFS.theme);
+  const [coverColor, setCoverColor] = useState(DEFAULT_PREFS.coverColor);
+
+  // Load user session
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return;
+      const email = session.user.email ?? "";
+      const name =
+        (session.user.user_metadata?.full_name as string | undefined) ??
+        email.split("@")[0];
+      setUserEmail(email);
+      setDisplayName(name);
+    });
+  }, []);
+
+  // Load persisted preferences
+  useEffect(() => {
+    AsyncStorage.getItem(PREFS_KEY).then((raw) => {
+      if (raw) {
+        const stored: Partial<Prefs> = JSON.parse(raw);
+        if (stored.dailyReminder !== undefined) setDailyReminder(stored.dailyReminder);
+        if (stored.onThisDay !== undefined) setOnThisDay(stored.onThisDay);
+        if (stored.weeklyDigest !== undefined) setWeeklyDigest(stored.weeklyDigest);
+        if (stored.iCloudBackup !== undefined) setICloudBackup(stored.iCloudBackup);
+        if (stored.driveBackup !== undefined) setDriveBackup(stored.driveBackup);
+        if (stored.appLock !== undefined) setAppLock(stored.appLock);
+        if (stored.theme !== undefined) setTheme(stored.theme);
+        if (stored.coverColor !== undefined) setCoverColor(stored.coverColor);
+      }
+      setPrefsLoaded(true);
+    });
+  }, []);
+
+  function savePref(patch: Partial<Prefs>) {
+    const current: Prefs = {
+      dailyReminder, onThisDay, weeklyDigest,
+      iCloudBackup, driveBackup, appLock, theme, coverColor,
+    };
+    AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...patch }));
+  }
+
+  function handleSignOut() {
+    Alert.alert(
+      "Sign out",
+      "You'll need to sign in again to access your journals.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign out",
+          style: "destructive",
+          onPress: async () => {
+            await supabase.auth.signOut();
+            router.replace("/");
+          },
+        },
+      ]
+    );
+  }
+
+  if (!prefsLoaded) return null;
 
   return (
     <ScrollView
@@ -419,7 +514,7 @@ export default function ProfileScreen() {
           <Text
             style={[styles.avatarLargeText, { fontFamily: "Inter_700Bold" }]}
           >
-            S
+            {displayName.charAt(0).toUpperCase() || "?"}
           </Text>
         </View>
         <Text
@@ -428,7 +523,7 @@ export default function ProfileScreen() {
             { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" },
           ]}
         >
-          Sarah
+          {displayName || userEmail}
         </Text>
         <Text
           style={[
@@ -436,7 +531,7 @@ export default function ProfileScreen() {
             { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
           ]}
         >
-          asdf@asdf.com
+          {userEmail}
         </Text>
       </View>
 
@@ -450,6 +545,7 @@ export default function ProfileScreen() {
           destructive
           chevron={false}
           last
+          onPress={handleSignOut}
         />
       </SectionCard>
 
@@ -460,7 +556,7 @@ export default function ProfileScreen() {
           icon="bell"
           label="Daily writing reminder"
           value={dailyReminder}
-          onChange={setDailyReminder}
+          onChange={(v) => { setDailyReminder(v); savePref({ dailyReminder: v }); }}
         />
         {dailyReminder && (
           <>
@@ -477,7 +573,7 @@ export default function ProfileScreen() {
           icon="calendar"
           label={"On this day"}
           value={onThisDay}
-          onChange={setOnThisDay}
+          onChange={(v) => { setOnThisDay(v); savePref({ onThisDay: v }); }}
         />
         {onThisDay && (
           <View style={styles.infoRow}>
@@ -495,7 +591,7 @@ export default function ProfileScreen() {
           icon="mail"
           label="Weekly digest"
           value={weeklyDigest}
-          onChange={setWeeklyDigest}
+          onChange={(v) => { setWeeklyDigest(v); savePref({ weeklyDigest: v }); }}
           last
         />
       </SectionCard>
@@ -508,14 +604,14 @@ export default function ProfileScreen() {
           icon="cloud"
           label="iCloud backup"
           value={iCloudBackup}
-          onChange={setICloudBackup}
+          onChange={(v) => { setICloudBackup(v); savePref({ iCloudBackup: v }); }}
         />
         <ToggleRow
           icon="cloud"
           iconColor="#4285F4"
           label="Google Drive backup"
           value={driveBackup}
-          onChange={setDriveBackup}
+          onChange={(v) => { setDriveBackup(v); savePref({ driveBackup: v }); }}
         />
         <Row icon="download" label="Export full archive" value="ZIP / PDF" />
         <Row
@@ -534,7 +630,7 @@ export default function ProfileScreen() {
           icon="shield"
           label="App lock (Face ID / Touch ID)"
           value={appLock}
-          onChange={setAppLock}
+          onChange={(v) => { setAppLock(v); savePref({ appLock: v }); }}
         />
         <Row icon="eye-off" label="Per-journal privacy" last />
       </SectionCard>
@@ -542,8 +638,8 @@ export default function ProfileScreen() {
       {/* ── Appearance ── */}
       <SectionHeader label="Appearance" />
       <SectionCard>
-        <ThemeRow value={theme} onChange={setTheme} />
-        <CoverColorRow value={coverColor} onChange={setCoverColor} />
+        <ThemeRow value={theme} onChange={(v) => { setTheme(v); savePref({ theme: v }); }} />
+        <CoverColorRow value={coverColor} onChange={(v) => { setCoverColor(v); savePref({ coverColor: v }); }} />
       </SectionCard>
 
       {/* ── Journaling ── */}

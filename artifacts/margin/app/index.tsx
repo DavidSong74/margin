@@ -171,7 +171,6 @@ export default function AuthScreen() {
           { paddingTop: pt, paddingBottom: pb },
         ]}
         keyboardShouldPersistTaps="handled"
-        bottomOffset={32}
         showsVerticalScrollIndicator={false}
       >
         {/* ── Wordmark ── */}
@@ -598,29 +597,7 @@ export default function AuthScreen() {
 
             {/* Social buttons */}
             <View style={styles.socialGroup}>
-              <TouchableOpacity
-                style={[
-                  styles.socialBtn,
-                  { borderColor: colors.border, backgroundColor: colors.background },
-                ]}
-                onPress={handleGoogleSignIn}
-                activeOpacity={0.75}
-                testID="btn-google"
-              >
-                <MaterialCommunityIcons
-                  name="google"
-                  size={18}
-                  color="#4285F4"
-                />
-                <Text
-                  style={[
-                    styles.socialText,
-                    { color: colors.foreground, fontFamily: "Inter_500Medium" },
-                  ]}
-                >
-                  Continue with Google
-                </Text>
-              </TouchableOpacity>
+              {/* Google sign-in hidden until OAuth is configured in Supabase dashboard */}
               <TouchableOpacity
                 style={[
                   styles.socialBtn,

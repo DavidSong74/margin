@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
-import React, { useState } from "react";
+import { useFocusEffect, router } from "expo-router";
+import React, { useCallback, useState } from "react";
 import {
   FlatList,
   Image,
@@ -16,6 +16,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
+import { supabase } from "@/lib/supabase";
+import type { Database } from "@/lib/database.types";
 
 const H_PAD = 20;
 const COL_GAP = 12;
@@ -23,81 +25,44 @@ const SPINE_W = 9;
 const TAB_BAR_H = 84;
 const MAX_CONTENT_W = 430;
 
-type CoverStyle = "solid" | "image";
+// ── Types ────────────────────────────────────────────────────
 
-interface Journal {
+interface JournalItem {
   id: string;
   title: string;
-  coverStyle: CoverStyle;
+  coverStyle: "solid" | "image";
   coverColor?: string;
-  coverImage?: string;
+  coverImage?: string; // signed URL at query time
+  coverImagePath?: string; // storage path (for signed URL generation)
   pageCount: number;
-  lastEdited: string;
+  createdAt: string;
 }
 
-const MOCK_JOURNALS: Journal[] = [
-  {
-    id: "1",
-    title: "Morning Pages",
-    coverStyle: "solid",
-    coverColor: "#c8b89a",
-    pageCount: 127,
-    lastEdited: "2h ago",
-  },
-  {
-    id: "2",
-    title: "Travel 2019",
-    coverStyle: "image",
-    coverImage: "https://picsum.photos/seed/travel2019/200/285",
-    pageCount: 64,
-    lastEdited: "3d ago",
-  },
-  {
-    id: "3",
-    title: "Dream Journal",
-    coverStyle: "solid",
-    coverColor: "#b8b0c8",
-    pageCount: 42,
-    lastEdited: "1w ago",
-  },
-  {
-    id: "4",
-    title: "Work Notes",
-    coverStyle: "solid",
-    coverColor: "#a8b8a0",
-    pageCount: 89,
-    lastEdited: "yesterday",
-  },
-  {
-    id: "5",
-    title: "Letters to Mom",
-    coverStyle: "image",
-    coverImage: "https://picsum.photos/seed/vintage43/200/285",
-    pageCount: 18,
-    lastEdited: "2w ago",
-  },
-  {
-    id: "6",
-    title: "Reading Notes",
-    coverStyle: "solid",
-    coverColor: "#b8a898",
-    pageCount: 31,
-    lastEdited: "5d ago",
-  },
-];
+type JournalRow = Database["public"]["Tables"]["journals"]["Row"] & {
+  pages: Array<{ count: number }>;
+};
 
-type GridItem = { type: "new" } | { type: "journal"; journal: Journal };
+type GridItem = { type: "new" } | { type: "journal"; journal: JournalItem };
 
 interface CardDims {
   cardW: number;
   cardH: number;
 }
 
+// ── Helpers ──────────────────────────────────────────────────
+
+function formatDate(isoString: string): string {
+  const d = new Date(isoString);
+  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+// ── Sub-components ───────────────────────────────────────────
+
 function JournalCover({
   journal,
   cardW,
   cardH,
-}: { journal: Journal } & CardDims) {
+}: { journal: JournalItem } & CardDims) {
   const colors = useColors();
   const isImage = journal.coverStyle === "image";
 
@@ -148,6 +113,40 @@ function JournalCover({
           {journal.title}
         </Text>
       </View>
+    </View>
+  );
+}
+
+function SkeletonCard({ cardW, cardH }: CardDims) {
+  const colors = useColors();
+  return (
+    <View style={{ marginBottom: COL_GAP }}>
+      <View
+        style={{
+          width: cardW,
+          height: cardH,
+          borderRadius: 10,
+          backgroundColor: colors.muted,
+        }}
+      />
+      <View
+        style={{
+          height: 12,
+          width: cardW * 0.7,
+          backgroundColor: colors.muted,
+          borderRadius: 4,
+          marginTop: 8,
+        }}
+      />
+      <View
+        style={{
+          height: 10,
+          width: cardW * 0.45,
+          backgroundColor: colors.muted,
+          borderRadius: 4,
+          marginTop: 4,
+        }}
+      />
     </View>
   );
 }
@@ -215,7 +214,10 @@ function EmptyState() {
       </Text>
       <TouchableOpacity
         style={[styles.emptyBtn, { backgroundColor: colors.primary }]}
-        onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          router.push("/journal/new");
+        }}
         activeOpacity={0.82}
       >
         <Feather name="plus" size={16} color="#fff" />
@@ -229,18 +231,20 @@ function EmptyState() {
   );
 }
 
+// ── Main screen ──────────────────────────────────────────────
+
 export default function LibraryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { width: rawW } = useWindowDimensions();
 
-  // On web the window can be very wide; cap to mobile-width content
   const effectiveW =
     Platform.OS === "web" ? Math.min(rawW, MAX_CONTENT_W) : rawW;
   const cardW = (effectiveW - H_PAD * 2 - COL_GAP) / 2;
   const cardH = cardW * 1.42;
 
-  const [journals, setJournals] = useState<Journal[]>(MOCK_JOURNALS);
+  const [journals, setJournals] = useState<JournalItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
 
@@ -248,12 +252,85 @@ export default function LibraryScreen() {
   const pb =
     Platform.OS === "web" ? 34 + TAB_BAR_H : insets.bottom + TAB_BAR_H;
 
+  // ── Data fetching ──────────────────────────────────────────
+
+  const fetchJournals = useCallback(async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: rawData, error } = await supabase
+        .from("journals")
+        .select("*, pages(count)")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const rows = (rawData ?? []) as unknown as JournalRow[];
+
+      // Generate signed URLs for image covers in one batch call
+      const imagePaths = rows
+        .filter((r) => r.cover_style === "image" && r.cover_image_url)
+        .map((r) => r.cover_image_url!);
+
+      let signedUrlMap: Record<string, string> = {};
+      if (imagePaths.length > 0) {
+        const { data: signed } = await supabase.storage
+          .from("covers")
+          .createSignedUrls(imagePaths, 3600);
+        signedUrlMap = Object.fromEntries(
+          (signed ?? []).map((s) => [s.path, s.signedUrl])
+        );
+      }
+
+      const mapped: JournalItem[] = rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        coverStyle: r.cover_style,
+        coverColor: r.cover_color ?? undefined,
+        coverImage:
+          r.cover_style === "image" && r.cover_image_url
+            ? signedUrlMap[r.cover_image_url]
+            : undefined,
+        coverImagePath: r.cover_image_url ?? undefined,
+        pageCount: r.pages?.[0]?.count ?? 0,
+        createdAt: r.created_at,
+      }));
+
+      setJournals(mapped);
+    } catch (err) {
+      console.error("[Library] fetchJournals error:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      fetchJournals();
+    }, [fetchJournals])
+  );
+
+  // ── Filtering ──────────────────────────────────────────────
+
+  const filtered = searchText.trim()
+    ? journals.filter((j) =>
+        j.title.toLowerCase().includes(searchText.toLowerCase())
+      )
+    : journals;
+
+  const isEmpty = !loading && filtered.length === 0;
+
   const gridData: GridItem[] = [
     { type: "new" },
-    ...journals.map((j) => ({ type: "journal" as const, journal: j })),
+    ...filtered.map((j) => ({ type: "journal" as const, journal: j })),
   ];
 
-  const isEmpty = journals.length === 0;
+  // ── Render helpers ─────────────────────────────────────────
 
   function renderItem({ item }: { item: GridItem }) {
     return (
@@ -262,7 +339,7 @@ export default function LibraryScreen() {
           <TouchableOpacity
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              console.log("New journal tapped");
+              router.push("/journal/new");
             }}
             activeOpacity={0.7}
           >
@@ -308,13 +385,17 @@ export default function LibraryScreen() {
                 },
               ]}
             >
-              {item.journal.pageCount} pages · {item.journal.lastEdited}
+              {item.journal.pageCount}{" "}
+              {item.journal.pageCount === 1 ? "page" : "pages"} ·{" "}
+              {formatDate(item.journal.createdAt)}
             </Text>
           </TouchableOpacity>
         )}
       </View>
     );
   }
+
+  // ── Header ─────────────────────────────────────────────────
 
   const ListHeader = (
     <View>
@@ -332,21 +413,14 @@ export default function LibraryScreen() {
           Margin
         </Text>
         <View style={styles.topActions}>
-          {/* Avatar */}
           <TouchableOpacity
             style={[styles.avatar, { backgroundColor: colors.primary }]}
-            onPress={() => {
-              Haptics.selectionAsync();
-              console.log("Profile tapped");
-            }}
+            onPress={() => Haptics.selectionAsync()}
           >
             <Text
-              style={[
-                styles.avatarInitial,
-                { fontFamily: "Inter_600SemiBold" },
-              ]}
+              style={[styles.avatarInitial, { fontFamily: "Inter_600SemiBold" }]}
             >
-              S
+              M
             </Text>
           </TouchableOpacity>
         </View>
@@ -357,10 +431,7 @@ export default function LibraryScreen() {
         <Text
           style={[
             styles.greeting,
-            {
-              color: colors.foreground,
-              fontFamily: "PlayfairDisplay_700Bold",
-            },
+            { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" },
           ]}
         >
           Your shelf
@@ -371,9 +442,11 @@ export default function LibraryScreen() {
             { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
           ]}
         >
-          {journals.length === 0
-            ? "No journals yet"
-            : `${journals.length} journal${journals.length === 1 ? "" : "s"}`}
+          {loading
+            ? "Loading…"
+            : journals.length === 0
+              ? "No journals yet"
+              : `${journals.length} journal${journals.length === 1 ? "" : "s"}`}
         </Text>
       </View>
 
@@ -408,14 +481,11 @@ export default function LibraryScreen() {
         />
       </View>
 
-      {!isEmpty && (
+      {!isEmpty && !loading && (
         <Text
           style={[
             styles.sectionLabel,
-            {
-              color: colors.mutedForeground,
-              fontFamily: "Inter_500Medium",
-            },
+            { color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
           ]}
         >
           All journals
@@ -424,7 +494,24 @@ export default function LibraryScreen() {
     </View>
   );
 
-  if (isEmpty) {
+  // ── Loading skeleton ────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <View style={[styles.root, { backgroundColor: colors.background }]}>
+        {ListHeader}
+        <View style={[styles.gridContent, styles.skeletonGrid]}>
+          {[0, 1, 2, 3].map((i) => (
+            <SkeletonCard key={i} cardW={cardW} cardH={cardH} />
+          ))}
+        </View>
+      </View>
+    );
+  }
+
+  // ── Empty state ─────────────────────────────────────────────
+
+  if (isEmpty && !searchText) {
     return (
       <View style={[styles.root, { backgroundColor: colors.background }]}>
         {ListHeader}
@@ -432,6 +519,8 @@ export default function LibraryScreen() {
       </View>
     );
   }
+
+  // ── Grid ────────────────────────────────────────────────────
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -443,16 +532,15 @@ export default function LibraryScreen() {
         renderItem={renderItem}
         numColumns={2}
         ListHeaderComponent={ListHeader}
-        contentContainerStyle={[
-          styles.gridContent,
-          { paddingBottom: pb },
-        ]}
+        contentContainerStyle={[styles.gridContent, { paddingBottom: pb }]}
         columnWrapperStyle={styles.columnWrapper}
         showsVerticalScrollIndicator={false}
       />
     </View>
   );
 }
+
+// ── Styles ───────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
@@ -469,13 +557,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-  },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
   },
   avatar: {
     width: 36,
@@ -516,12 +597,16 @@ const styles = StyleSheet.create({
 
   gridContent: { paddingHorizontal: H_PAD },
   columnWrapper: { justifyContent: "space-between", marginBottom: 0 },
+  skeletonGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
 
   coverOuter: {
     borderRadius: 10,
     overflow: "hidden",
     borderWidth: 1,
-    // Native shadows
     shadowColor: "#4a3f35",
     shadowOffset: { width: 2, height: 6 },
     shadowOpacity: 0.18,
