@@ -1,7 +1,10 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
+import * as Linking from "expo-linking";
+import * as WebBrowser from "expo-web-browser";
 import React, { useCallback, useRef, useState } from "react";
+
+import { supabase } from "@/lib/supabase";
 import {
   ActivityIndicator,
   Animated,
@@ -16,6 +19,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useColors } from "@/hooks/useColors";
+
+WebBrowser.maybeCompleteAuthSession();
 
 type Mode = "login" | "signup";
 
@@ -33,6 +38,7 @@ export default function AuthScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [signupPending, setSignupPending] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
@@ -65,9 +71,6 @@ export default function AuthScreen() {
     [mode, fadeAnim],
   );
 
-  const MOCK_EMAIL = "asdf@asdf.com";
-  const MOCK_PASSWORD = "12341234";
-
   const validate = (): boolean => {
     const next: Record<string, string> = {};
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -75,13 +78,6 @@ export default function AuthScreen() {
     }
     if (password.length < 8) {
       next.password = "Password must be at least 8 characters.";
-    }
-    if (mode === "login") {
-      if (email === MOCK_EMAIL && password !== MOCK_PASSWORD) {
-        next.password = "Incorrect password.";
-      } else if (email !== MOCK_EMAIL && password.length >= 8) {
-        next.email = "No account found for this email.";
-      }
     }
     if (mode === "signup" && password !== confirmPassword) {
       next.confirmPassword = "Passwords don't match.";
@@ -97,9 +93,63 @@ export default function AuthScreen() {
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 900));
-    setSubmitting(false);
-    router.replace("/(tabs)");
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) {
+          const msg = error.message.toLowerCase();
+          if (msg.includes("invalid login") || msg.includes("invalid credentials")) {
+            setErrors({ password: "Incorrect email or password." });
+          } else {
+            setErrors({ email: error.message });
+          }
+        }
+        // On success, _layout.tsx onAuthStateChange handles navigation.
+      } else {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { name: name.trim() || null } },
+        });
+        if (error) {
+          const msg = error.message.toLowerCase();
+          if (msg.includes("already registered") || msg.includes("already exists")) {
+            setErrors({ email: "An account with this email already exists." });
+          } else {
+            setErrors({ email: error.message });
+          }
+        } else if (!data.session) {
+          // Email confirmation required — tell the user to check their inbox.
+          setSignupPending(true);
+        }
+        // If data.session exists, onAuthStateChange in _layout.tsx handles navigation.
+      }
+    } catch {
+      setErrors({ email: "Something went wrong. Please try again." });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const redirectUrl = Linking.createURL("/");
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: redirectUrl, skipBrowserRedirect: true },
+      });
+      if (error || !data.url) return;
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
+      if (result.type === "success" && result.url) {
+        await supabase.auth.exchangeCodeForSession(result.url);
+      }
+    } catch {
+      // User cancelled or OAuth not configured — fail silently.
+    }
   };
 
   const inputBorderColor = (field: string, hasError: boolean) => {
@@ -154,6 +204,47 @@ export default function AuthScreen() {
             { backgroundColor: colors.card, borderColor: colors.border },
           ]}
         >
+          {signupPending ? (
+            <View style={styles.pendingWrap}>
+              <MaterialCommunityIcons
+                name="email-outline"
+                size={40}
+                color={colors.primary}
+                style={{ marginBottom: 16 }}
+              />
+              <Text
+                style={[
+                  styles.heading,
+                  { color: colors.foreground, fontFamily: "PlayfairDisplay_600SemiBold" },
+                ]}
+              >
+                Check your email
+              </Text>
+              <Text
+                style={[
+                  styles.subheading,
+                  { color: colors.mutedForeground, fontFamily: "Inter_400Regular", textAlign: "center" },
+                ]}
+              >
+                We sent a confirmation link to{" "}
+                <Text style={{ color: colors.foreground }}>{email}</Text>.
+                {"\n"}Click it to activate your account.
+              </Text>
+              <TouchableOpacity
+                onPress={() => setSignupPending(false)}
+                style={{ marginTop: 24 }}
+              >
+                <Text
+                  style={[
+                    styles.toggleLink,
+                    { color: colors.primary, fontFamily: "Inter_600SemiBold" },
+                  ]}
+                >
+                  Back to sign in
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
           <Animated.View style={{ opacity: fadeAnim }}>
             {/* Heading */}
             <Text
@@ -512,7 +603,7 @@ export default function AuthScreen() {
                   styles.socialBtn,
                   { borderColor: colors.border, backgroundColor: colors.background },
                 ]}
-                onPress={() => Haptics.selectionAsync()}
+                onPress={handleGoogleSignIn}
                 activeOpacity={0.75}
                 testID="btn-google"
               >
@@ -586,26 +677,34 @@ export default function AuthScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Dev-only bypass */}
-            <TouchableOpacity
-              onPress={() => router.replace("/(tabs)")}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={styles.devSkipBtn}
-              testID="btn-dev-skip"
-            >
-              <Text
-                style={[
-                  styles.devSkipText,
-                  {
-                    color: colors.mutedForeground,
-                    fontFamily: "Inter_400Regular",
-                  },
-                ]}
+            {/* Dev-only bypass — not rendered in production builds */}
+            {__DEV__ && (
+              <TouchableOpacity
+                onPress={async () => {
+                  await supabase.auth.signInWithPassword({
+                    email: "dev@margin.app",
+                    password: "devdevdev",
+                  });
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.devSkipBtn}
+                testID="btn-dev-skip"
               >
-                Skip login (dev only)
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={[
+                    styles.devSkipText,
+                    {
+                      color: colors.mutedForeground,
+                      fontFamily: "Inter_400Regular",
+                    },
+                  ]}
+                >
+                  Skip login (dev only)
+                </Text>
+              </TouchableOpacity>
+            )}
           </Animated.View>
+          )}
         </View>
       </KeyboardAwareScrollViewCompat>
     </View>
@@ -755,5 +854,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     opacity: 0.5,
     letterSpacing: 0.1,
+  },
+  pendingWrap: {
+    alignItems: "center",
+    paddingVertical: 12,
   },
 });
