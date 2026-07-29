@@ -497,7 +497,7 @@ export default function ProfileScreen() {
     );
   }
 
-  if (!prefsLoaded) return null;
+  if (!prefsLoaded) return <View style={[styles.root, { backgroundColor: colors.background }]} />;
 
   return (
     <ScrollView

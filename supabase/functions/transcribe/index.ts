@@ -11,7 +11,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ── Constants ──────────────────────────────────────────────
 
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-2.0-flash-lite";
 const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const GLOSSARY_CAP = 50; // max glossary entries injected into prompt
 
@@ -88,7 +88,13 @@ Deno.serve(async (req: Request) => {
     // Convert blob to base64
     const imageBuffer = await imageBlob.arrayBuffer();
     const imageBytes = new Uint8Array(imageBuffer);
-    const base64Image = btoa(String.fromCharCode(...imageBytes));
+    // Spread operator crashes on large arrays; process in chunks instead
+    let binary = "";
+    const CHUNK = 8192;
+    for (let i = 0; i < imageBytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...imageBytes.subarray(i, i + CHUNK));
+    }
+    const base64Image = btoa(binary);
 
     // ── 6. Fetch glossary (cap at 50 most-recently updated) ──
     const { data: glossaryRows } = await adminClient

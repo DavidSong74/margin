@@ -221,34 +221,13 @@ export default function JournalReaderScreen() {
     [pages]
   );
 
-  const advanceCorrection = useCallback(
-    (decision: CorrDecision) => {
-      corrDecisions.current.push(decision);
-      if (corrModalPageIdx === null) return;
-
-      const corrections = pages[corrModalPageIdx].pendingCorrections;
-      const nextIdx = corrModalCorrIdx + 1;
-
-      if (nextIdx >= corrections.length) {
-        // All corrections reviewed — commit and close
-        finishCorrectionSession();
-      } else {
-        setCorrModalCorrIdx(nextIdx);
-        setCorrEditText(corrections[nextIdx].suggested);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [corrModalPageIdx, corrModalCorrIdx, pages]
-  );
-
   const finishCorrectionSession = useCallback(async () => {
     if (corrModalPageIdx === null) return;
     setCorrSaving(true);
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error("Not authenticated");
 
       const page = pages[corrModalPageIdx];
@@ -300,6 +279,25 @@ export default function JournalReaderScreen() {
       setCorrModalPageIdx(null);
     }
   }, [corrModalPageIdx, pages]);
+
+  const advanceCorrection = useCallback(
+    (decision: CorrDecision) => {
+      corrDecisions.current.push(decision);
+      if (corrModalPageIdx === null) return;
+
+      const corrections = pages[corrModalPageIdx].pendingCorrections;
+      const nextIdx = corrModalCorrIdx + 1;
+
+      if (nextIdx >= corrections.length) {
+        // All corrections reviewed — commit and close
+        finishCorrectionSession();
+      } else {
+        setCorrModalCorrIdx(nextIdx);
+        setCorrEditText(corrections[nextIdx].suggested);
+      }
+    },
+    [corrModalPageIdx, corrModalCorrIdx, pages, finishCorrectionSession]
+  );
 
   // ── Computed values ──────────────────────────────────────────
 

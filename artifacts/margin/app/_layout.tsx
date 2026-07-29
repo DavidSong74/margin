@@ -39,7 +39,9 @@ function NavigationGuard({
   useEffect(() => {
     if (!initialized) return;
     const inTabs = segments[0] === "(tabs)";
-    if (session && !inTabs) {
+    // Auth screen has no named segment. Any known authenticated route is NOT the auth screen.
+    const onAuthenticatedRoute = inTabs || segments[0] === "journal" || segments[0] === "capture";
+    if (session && !onAuthenticatedRoute) {
       router.replace("/(tabs)");
     } else if (!session && inTabs) {
       router.replace("/");

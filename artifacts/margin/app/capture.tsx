@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system";
+import * as Crypto from "expo-crypto";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import * as ImageManipulator from "expo-image-manipulator";
 import { CameraView, useCameraPermissions, type CameraType, type FlashMode } from "expo-camera";
@@ -8,11 +9,11 @@ import React, { useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Animated,
-  Dimensions,
   Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Image } from "expo-image";
@@ -27,11 +28,6 @@ type ScreenState = "permission" | "viewfinder" | "preview" | "uploading";
 
 type QualityIssue = "dark" | "blur" | null;
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-
-// The scanning frame is 88% of screen width, 4:3 aspect ratio
-const FRAME_W = SCREEN_W * 0.88;
-const FRAME_H = FRAME_W * (4 / 3);
 const BRACKET = 28; // corner bracket arm length
 const BRACKET_T = 3; // bracket thickness
 
@@ -75,6 +71,9 @@ function Corner({ position }: { position: "tl" | "tr" | "bl" | "br" }) {
 export default function CaptureScreen() {
   const { journal_id } = useLocalSearchParams<{ journal_id: string }>();
   const insets = useSafeAreaInsets();
+  const { width: SCREEN_W, height: SCREEN_H } = useWindowDimensions();
+  const FRAME_W = SCREEN_W * 0.88;
+  const FRAME_H = FRAME_W * (4 / 3);
   const [permission, requestPermission] = useCameraPermissions();
 
   const [facing] = useState<CameraType>("back");
@@ -88,29 +87,8 @@ export default function CaptureScreen() {
   const cameraRef = useRef<CameraView>(null);
   const flashAnim = useRef(new Animated.Value(0)).current;
 
-  // ── Permission not yet determined ──────────────────────
-
-  if (!permission) return <View style={styles.bg} />;
-
-  if (!permission.granted) {
-    return (
-      <View style={[styles.bg, styles.centered]}>
-        <Feather name="camera-off" size={40} color="#fff" style={{ marginBottom: 20 }} />
-        <Text style={styles.permTitle}>Camera access needed</Text>
-        <Text style={styles.permDesc}>
-          Margin photographs your journal pages. Grant camera access to continue.
-        </Text>
-        <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
-          <Text style={styles.permBtnText}>Grant access</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
-          <Text style={styles.permBack}>Go back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
   // ── Capture ────────────────────────────────────────────
+  // All hooks must be declared before any early returns.
 
   const capture = useCallback(async () => {
     if (!cameraRef.current) return;
@@ -145,14 +123,21 @@ export default function CaptureScreen() {
       );
       if (!thumb.base64) return null;
 
-      const raw = atob(thumb.base64);
+      // Decode base64 without atob (not available on Hermes/Android)
+      const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      const b64 = thumb.base64.replace(/=/g, "");
       let totalLuminance = 0;
       let pixelCount = 0;
-      // Sample every 4th byte (skip alpha) — approximation, not exact luma
-      for (let i = 0; i < raw.length - 2; i += 3) {
-        const r = raw.charCodeAt(i);
-        const g = raw.charCodeAt(i + 1);
-        const b = raw.charCodeAt(i + 2);
+      // Decode 4 base64 chars → 3 bytes, sample RGB triplets for luminance
+      for (let i = 0; i + 3 < b64.length; i += 4) {
+        const n =
+          (B64.indexOf(b64[i]) << 18) |
+          (B64.indexOf(b64[i + 1]) << 12) |
+          (B64.indexOf(b64[i + 2]) << 6) |
+          B64.indexOf(b64[i + 3]);
+        const r = (n >> 16) & 0xff;
+        const g = (n >> 8) & 0xff;
+        const b = n & 0xff;
         totalLuminance += 0.299 * r + 0.587 * g + 0.114 * b;
         pixelCount++;
       }
@@ -174,10 +159,11 @@ export default function CaptureScreen() {
     setUploadProgress(0);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error("Not authenticated");
 
-      const pageId = crypto.randomUUID();
+      const pageId = Crypto.randomUUID();
       const imageExt = "jpg";
       const imagePath = `${user.id}/${journal_id}/${pageId}.${imageExt}`;
       const thumbPath = `${user.id}/${journal_id}/${pageId}_thumb.${imageExt}`;
@@ -193,7 +179,7 @@ export default function CaptureScreen() {
       // 2. Upload full-resolution image
       setUploadProgress(20);
       const imageBase64 = await FileSystem.readAsStringAsync(capturedUri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: "base64",
       });
       const { error: imageErr } = await supabase.storage
         .from("journal_pages")
@@ -204,7 +190,7 @@ export default function CaptureScreen() {
 
       // 3. Upload thumbnail
       const thumbBase64 = await FileSystem.readAsStringAsync(thumbnail.uri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: "base64",
       });
       await supabase.storage
         .from("journal_pages")
@@ -260,6 +246,28 @@ export default function CaptureScreen() {
 
   const flashIcon = flash === "on" ? "zap" : flash === "auto" ? "zap" : "zap-off";
   const flashLabel = flash === "on" ? "On" : flash === "auto" ? "Auto" : "Off";
+
+  // ── Permission guards (after all hooks) ────────────────
+
+  if (!permission) return <View style={styles.bg} />;
+
+  if (!permission.granted) {
+    return (
+      <View style={[styles.bg, styles.centered]}>
+        <Feather name="camera-off" size={40} color="#fff" style={{ marginBottom: 20 }} />
+        <Text style={styles.permTitle}>Camera access needed</Text>
+        <Text style={styles.permDesc}>
+          Margin photographs your journal pages. Grant camera access to continue.
+        </Text>
+        <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
+          <Text style={styles.permBtnText}>Grant access</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16 }}>
+          <Text style={styles.permBack}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   // ── Viewfinder ─────────────────────────────────────────
 

@@ -47,11 +47,15 @@ If prompted about build scripts, run `pnpm approve-builds` then `pnpm install --
 
 ## Run
 
-Start the main frontend:
+Start the main frontend (physical device / Expo Go):
 
 ```bash
-pnpm --filter @workspace/margin dev
+cd artifacts/margin && pnpm exec expo start
 ```
+
+This uses your machine's LAN IP so Expo Go on Android or iOS can connect over Wi-Fi. Both devices must be on the same network.
+
+The `pnpm --filter @workspace/margin dev` command also works but binds to `localhost`, which is only usable in a browser — it will fail when scanning the QR code on a physical device.
 
 Start the web mockup frontend:
 

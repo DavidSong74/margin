@@ -1,8 +1,9 @@
-import * as FileSystem from "expo-file-system";
+import * as Crypto from "expo-crypto";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { decode } from "base64-arraybuffer";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -80,15 +81,16 @@ export default function NewJournalScreen() {
     setError(null);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) throw new Error("Not authenticated");
 
-      const journalId = crypto.randomUUID();
+      const journalId = Crypto.randomUUID();
       let coverImagePath: string | null = null;
 
       if (coverIsPhoto && photoCoverUri) {
         const base64 = await FileSystem.readAsStringAsync(photoCoverUri, {
-          encoding: FileSystem.EncodingType.Base64,
+          encoding: "base64",
         });
         const storagePath = `${user.id}/${journalId}/cover.jpg`;
         const { error: uploadError } = await supabase.storage
@@ -124,7 +126,7 @@ export default function NewJournalScreen() {
     }
   }, [title, coverIsPhoto, photoCoverUri, selectedColor, router]);
 
-  const styles = makeStyles(colors);
+  const styles = useMemo(() => makeStyles(colors), [colors]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top || 16 }]}>

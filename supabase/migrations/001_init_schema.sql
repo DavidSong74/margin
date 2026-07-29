@@ -151,17 +151,52 @@ end;
 $$;
 
 
--- ── Storage buckets (run separately if needed) ─────────────
--- Supabase Dashboard → Storage → New bucket
+-- ── Storage buckets ────────────────────────────────────────
+-- Create via Supabase Dashboard → Storage → New bucket
 --   Name: journal_pages   Private: true
 --   Name: covers          Private: true
---
--- Storage RLS — journal_pages bucket:
--- insert: (auth.uid() = (storage.foldername(name))[1]::uuid)
--- select: (auth.uid() = (storage.foldername(name))[1]::uuid)
--- Paths are structured: {user_id}/{journal_id}/{uuid}.jpg
---
--- Storage RLS — covers bucket:
--- insert: (auth.uid() = (storage.foldername(name))[1]::uuid)
--- select: (auth.uid() = (storage.foldername(name))[1]::uuid)
--- Paths are structured: {user_id}/covers/{uuid}.jpg
+-- Then run the policies below.
+
+-- journal_pages bucket policies
+create policy "journal_pages: insert own"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'journal_pages' and
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "journal_pages: select own"
+  on storage.objects for select to authenticated
+  using (
+    bucket_id = 'journal_pages' and
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "journal_pages: delete own"
+  on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'journal_pages' and
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+-- covers bucket policies
+create policy "covers: insert own"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'covers' and
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "covers: select own"
+  on storage.objects for select to authenticated
+  using (
+    bucket_id = 'covers' and
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+create policy "covers: delete own"
+  on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'covers' and
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
