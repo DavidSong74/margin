@@ -1,0 +1,1 @@
+- Supabase Edge Functions: Do not trust object paths directly from client request payloads when downloading files using an adminClient (service role). Always retrieve object references from database records after verifying the user owns the record to prevent Insecure Direct Object Reference (IDOR) vulnerabilities.
