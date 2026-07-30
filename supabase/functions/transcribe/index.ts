@@ -4,7 +4,7 @@
 // Deploy: supabase functions deploy transcribe
 // Secrets: supabase secrets set GEMINI_API_KEY=<key> SUPABASE_SERVICE_ROLE_KEY=<key>
 //
-// Request body: { page_id: string, image_path: string }
+// Request body: { page_id: string }
 // Auth: Bearer <user JWT> in Authorization header
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -39,14 +39,12 @@ Deno.serve(async (req: Request) => {
 
   // ── 2. Parse body ────────────────────────────────────────
   let page_id: string;
-  let image_path: string;
   try {
     const body = await req.json();
     page_id = body.page_id;
-    image_path = body.image_path;
-    if (!page_id || !image_path) throw new Error("missing fields");
+    if (!page_id) throw new Error("missing fields");
   } catch {
-    return json({ error: "Invalid request body — expected { page_id, image_path }" }, 400);
+    return json({ error: "Invalid request body — expected { page_id }" }, 400);
   }
 
   // Service-role client — bypasses RLS for storage access and page writes
@@ -55,7 +53,7 @@ Deno.serve(async (req: Request) => {
   // ── 3. Verify the page belongs to this user ──────────────
   const { data: pageRow, error: pageErr } = await adminClient
     .from("pages")
-    .select("id, journal_id, transcription_status, journals!inner(user_id)")
+    .select("id, journal_id, image_path, transcription_status, journals!inner(user_id)")
     .eq("id", page_id)
     .single();
 
@@ -74,6 +72,8 @@ Deno.serve(async (req: Request) => {
     .from("pages")
     .update({ transcription_status: "processing" })
     .eq("id", page_id);
+
+  const image_path = pageRow.image_path;
 
   try {
     // ── 5. Download image from Storage ─────────────────────

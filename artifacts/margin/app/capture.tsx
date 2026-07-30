@@ -192,7 +192,7 @@ export default function CaptureScreen() {
     if (insertErr) throw insertErr;
 
     supabase.functions
-      .invoke("transcribe", { body: { page_id: pageId, image_path: imagePath } })
+      .invoke("transcribe", { body: { page_id: pageId } })
       .catch((err) => console.warn("[transcribe] invoke failed:", err));
   }, [journal_id]);
 
