@@ -655,12 +655,12 @@ export default function AuthScreen() {
             </View>
 
             {/* Dev-only bypass — not rendered in production builds */}
-            {__DEV__ && (
+            {__DEV__ && process.env.EXPO_PUBLIC_DEV_EMAIL && process.env.EXPO_PUBLIC_DEV_PASSWORD && (
               <TouchableOpacity
                 onPress={async () => {
                   await supabase.auth.signInWithPassword({
-                    email: "dev@margin.app",
-                    password: "devdevdev",
+                    email: process.env.EXPO_PUBLIC_DEV_EMAIL as string,
+                    password: process.env.EXPO_PUBLIC_DEV_PASSWORD as string,
                   });
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

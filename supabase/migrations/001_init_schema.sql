@@ -138,7 +138,7 @@ create or replace function save_correction(
   p_original  text,
   p_corrected text,
   p_user_id   uuid
-) returns void language plpgsql security invoker as $$
+) returns void language plpgsql security definer as $$
 begin
   insert into corrections (page_id, original_word, corrected_word)
     values (p_page_id, p_original, p_corrected);
