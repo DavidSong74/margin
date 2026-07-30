@@ -60,6 +60,7 @@
     "expo-camera": "^17.0.10",
     "expo-crypto": "~15.0.9",
     "expo-file-system": "^19.0.23",
-    "expo-image-manipulator": "^14.0.8"
+    "expo-image-manipulator": "^14.0.8",
+    "expo-secure-store": "^15.0.8"
   }
 }

@@ -1,4 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
@@ -455,7 +455,7 @@ export default function ProfileScreen() {
 
   // Load persisted preferences
   useEffect(() => {
-    AsyncStorage.getItem(PREFS_KEY).then((raw) => {
+    SecureStore.getItemAsync(PREFS_KEY).then((raw) => {
       if (raw) {
         const stored: Partial<Prefs> = JSON.parse(raw);
         if (stored.dailyReminder !== undefined) setDailyReminder(stored.dailyReminder);
@@ -476,7 +476,7 @@ export default function ProfileScreen() {
       dailyReminder, onThisDay, weeklyDigest,
       iCloudBackup, driveBackup, appLock, theme, coverColor,
     };
-    AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...patch }));
+    SecureStore.setItemAsync(PREFS_KEY, JSON.stringify({ ...current, ...patch }));
   }
 
   function handleSignOut() {
