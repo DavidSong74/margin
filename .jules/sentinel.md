@@ -1,0 +1,1 @@
+When parsing un-sanitized headers in raw Node.js HTTP servers, use try-catch around URL construction to prevent DoS via Unhandled Promise Rejections or Uncaught Exceptions. Also, use the parsed URL object's .host property as a reliable way to strip and sanitize Host headers.
