@@ -98,7 +98,7 @@ function getPreviewExamplePath(): string {
 
 function Gallery() {
   const basePath = getBasePath();
-  const componentPaths = Object.keys(modules).map((key) =>
+  const componentPaths = Object.keys(discoveredModules).map((key) =>
     key.replace("./components/mockups/", "").replace(".tsx", ""),
   );
 
