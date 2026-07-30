@@ -7,6 +7,7 @@ import React, { useCallback, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Platform,
   StyleSheet,
@@ -658,10 +659,11 @@ export default function AuthScreen() {
             {__DEV__ && (
               <TouchableOpacity
                 onPress={async () => {
-                  await supabase.auth.signInWithPassword({
+                  const { error } = await supabase.auth.signInWithPassword({
                     email: "dev@margin.app",
                     password: "devdevdev",
                   });
+                  if (error) Alert.alert("Dev login failed", error.message);
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 style={styles.devSkipBtn}

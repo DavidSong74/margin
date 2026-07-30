@@ -4,6 +4,7 @@ import { useFocusEffect, router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -79,7 +80,7 @@ export default function JournalReaderScreen() {
   const [corrSaving, setCorrSaving] = useState(false);
   const corrDecisions = useRef<CorrDecision[]>([]);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<FlatList<JournalPage>>(null);
   const totalPages = pages.length;
 
   // ── Fetch pages ──────────────────────────────────────────────
@@ -130,7 +131,7 @@ export default function JournalReaderScreen() {
       if (initialPage > 0 && initialPage < mapped.length) {
         setCurrentPage(initialPage);
         requestAnimationFrame(() => {
-          scrollRef.current?.scrollTo({ x: initialPage * effectiveW, animated: false });
+          scrollRef.current?.scrollToOffset({ offset: initialPage * effectiveW, animated: false });
         });
       }
     } catch (err) {
@@ -155,7 +156,9 @@ export default function JournalReaderScreen() {
       Haptics.selectionAsync();
       setCurrentPage(clamped);
       setContentView("transcription");
-      scrollRef.current?.scrollTo({ x: clamped * effectiveW, animated: true });
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollToOffset({ offset: clamped * effectiveW, animated: true });
+      });
     },
     [currentPage, totalPages, effectiveW]
   );
@@ -529,17 +532,27 @@ export default function JournalReaderScreen() {
 
       {/* Pages horizontal scroll pager */}
       <View style={styles.pagesArea}>
-        <ScrollView
+        <FlatList
           ref={scrollRef}
+          data={pages}
           horizontal
           pagingEnabled
           scrollEnabled={!editMode}
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={onMomentumScrollEnd}
           scrollEventThrottle={16}
-        >
-          {pages.map((page, index) => (
-            <View key={page.id} style={{ width: effectiveW }}>
+          keyExtractor={(item) => item.id}
+          getItemLayout={(_data, index) => ({
+            length: effectiveW,
+            offset: effectiveW * index,
+            index,
+          })}
+          windowSize={5}
+          initialNumToRender={3}
+          maxToRenderPerBatch={2}
+          removeClippedSubviews={false}
+          renderItem={({ item: page, index }) => (
+            <View style={{ width: effectiveW }}>
               <View style={styles.pageCenter}>
                 <View style={[styles.pageColumn, { maxWidth: MAX_CONTENT_W }]}>
                   {/* ── Original image view ────────────────── */}
@@ -676,8 +689,8 @@ export default function JournalReaderScreen() {
                 </View>
               </View>
             </View>
-          ))}
-        </ScrollView>
+          )}
+        />
       </View>
 
       {/* Footer: prev/next + dots */}

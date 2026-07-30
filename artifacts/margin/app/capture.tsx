@@ -3,9 +3,10 @@ import * as Crypto from "expo-crypto";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import * as ImageManipulator from "expo-image-manipulator";
+import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions, type CameraType, type FlashMode } from "expo-camera";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -24,7 +25,7 @@ import { supabase } from "@/lib/supabase";
 
 // ── Types ─────────────────────────────────────────────────
 
-type ScreenState = "permission" | "viewfinder" | "preview" | "uploading";
+type ScreenState = "permission" | "viewfinder" | "preview" | "uploading" | "batch_uploading";
 
 type QualityIssue = "dark" | "blur" | null;
 
@@ -83,6 +84,9 @@ export default function CaptureScreen() {
   const [qualityIssue, setQualityIssue] = useState<QualityIssue>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+  const [batchCount, setBatchCount] = useState(0);
+  const [startPageNumber, setStartPageNumber] = useState<number | null>(null);
 
   const cameraRef = useRef<CameraView>(null);
   const flashAnim = useRef(new Animated.Value(0)).current;
@@ -149,6 +153,49 @@ export default function CaptureScreen() {
     }
   };
 
+  // ── Single-photo upload helper (shared by usePhoto + pickAndUploadPhotos) ──
+
+  const uploadSinglePhoto = useCallback(async (
+    uri: string,
+    pageNumber: number,
+    user: { id: string },
+  ): Promise<void> => {
+    const pageId = Crypto.randomUUID();
+    const imagePath = `${user.id}/${journal_id}/${pageId}.jpg`;
+    const thumbPath = `${user.id}/${journal_id}/${pageId}_thumb.jpg`;
+
+    const thumbnail = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 800 } }],
+      { compress: 0.3, format: ImageManipulator.SaveFormat.JPEG },
+    );
+
+    const imageBase64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
+    const { error: imageErr } = await supabase.storage
+      .from("journal_pages")
+      .upload(imagePath, decode(imageBase64), { contentType: "image/jpeg" });
+    if (imageErr) throw imageErr;
+
+    const thumbBase64 = await FileSystem.readAsStringAsync(thumbnail.uri, { encoding: "base64" });
+    await supabase.storage
+      .from("journal_pages")
+      .upload(thumbPath, decode(thumbBase64), { contentType: "image/jpeg" });
+
+    const { error: insertErr } = await supabase.from("pages").insert({
+      id: pageId,
+      journal_id,
+      page_number: pageNumber,
+      image_path: imagePath,
+      thumbnail_path: thumbPath,
+      transcription_status: "pending",
+    });
+    if (insertErr) throw insertErr;
+
+    supabase.functions
+      .invoke("transcribe", { body: { page_id: pageId, image_path: imagePath } })
+      .catch((err) => console.warn("[transcribe] invoke failed:", err));
+  }, [journal_id]);
+
   // ── Upload ─────────────────────────────────────────────
 
   const usePhoto = useCallback(async () => {
@@ -163,81 +210,94 @@ export default function CaptureScreen() {
       const user = session?.user;
       if (!user) throw new Error("Not authenticated");
 
-      const pageId = Crypto.randomUUID();
-      const imageExt = "jpg";
-      const imagePath = `${user.id}/${journal_id}/${pageId}.${imageExt}`;
-      const thumbPath = `${user.id}/${journal_id}/${pageId}_thumb.${imageExt}`;
+      // Determine page number — query DB only on first shot; increment locally after
+      let pageNumber: number;
+      if (startPageNumber === null) {
+        const { count } = await supabase
+          .from("pages")
+          .select("*", { count: "exact", head: true })
+          .eq("journal_id", journal_id);
+        const base = (count ?? 0) + 1;
+        setStartPageNumber(base);
+        pageNumber = base + batchCount;
+      } else {
+        pageNumber = startPageNumber + batchCount;
+      }
 
-      // 1. Compress thumbnail (30% quality, max 800px wide)
-      setUploadProgress(10);
-      const thumbnail = await ImageManipulator.manipulateAsync(
-        capturedUri,
-        [{ resize: { width: 800 } }],
-        { compress: 0.3, format: ImageManipulator.SaveFormat.JPEG },
-      );
-
-      // 2. Upload full-resolution image
       setUploadProgress(20);
-      const imageBase64 = await FileSystem.readAsStringAsync(capturedUri, {
-        encoding: "base64",
-      });
-      const { error: imageErr } = await supabase.storage
-        .from("journal_pages")
-        .upload(imagePath, decode(imageBase64), { contentType: "image/jpeg" });
-      if (imageErr) throw imageErr;
-
-      setUploadProgress(60);
-
-      // 3. Upload thumbnail
-      const thumbBase64 = await FileSystem.readAsStringAsync(thumbnail.uri, {
-        encoding: "base64",
-      });
-      await supabase.storage
-        .from("journal_pages")
-        .upload(thumbPath, decode(thumbBase64), { contentType: "image/jpeg" });
-
-      setUploadProgress(80);
-
-      // 4. Get current page count to assign page_number
-      const { count } = await supabase
-        .from("pages")
-        .select("*", { count: "exact", head: true })
-        .eq("journal_id", journal_id);
-
-      const pageNumber = (count ?? 0) + 1;
-
-      // 5. Insert pages row — transcription_status defaults to 'pending'
-      const { error: insertErr } = await supabase.from("pages").insert({
-        id: pageId,
-        journal_id,
-        page_number: pageNumber,
-        image_path: imagePath,
-        thumbnail_path: thumbPath,
-        transcription_status: "pending",
-      });
-      if (insertErr) throw insertErr;
-
+      await uploadSinglePhoto(capturedUri, pageNumber, user);
       setUploadProgress(100);
 
-      // 6. Navigate to reader, then kick off transcription in background
-      router.replace({ pathname: "/journal/[id]", params: { id: journal_id } });
-
-      // Fire-and-forget transcription call — errors are logged server-side
-      supabase.functions
-        .invoke("transcribe", { body: { page_id: pageId, image_path: imagePath } })
-        .catch((err) => console.warn("[transcribe] invoke failed:", err));
+      // Return to viewfinder for next shot; Done button navigates to reader
+      setBatchCount((n) => n + 1);
+      setCapturedUri(null);
+      setQualityIssue(null);
+      setUploadError(null);
+      setUploadProgress(0);
+      setScreen("viewfinder");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Upload failed";
       setUploadError(msg);
       setScreen("preview");
     }
-  }, [capturedUri, journal_id]);
+  }, [capturedUri, journal_id, startPageNumber, batchCount, uploadSinglePhoto]);
 
   const retake = useCallback(() => {
     setCapturedUri(null);
     setQualityIssue(null);
     setUploadError(null);
     setScreen("viewfinder");
+  }, []);
+
+  // ── Pick multiple photos from library ──────────────────
+
+  const pickAndUploadPhotos = useCallback(async () => {
+    if (!journal_id) return;
+
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      quality: 0.9,
+      orderedSelection: true,
+    });
+    if (result.canceled || result.assets.length === 0) return;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
+    if (!user) return;
+
+    const { count } = await supabase
+      .from("pages")
+      .select("*", { count: "exact", head: true })
+      .eq("journal_id", journal_id);
+    const base = (count ?? 0) + 1;
+
+    setScreen("batch_uploading");
+    setBatchProgress({ current: 0, total: result.assets.length });
+
+    try {
+      for (let i = 0; i < result.assets.length; i++) {
+        setBatchProgress({ current: i + 1, total: result.assets.length });
+        await uploadSinglePhoto(result.assets[i].uri, base + i, user);
+      }
+      router.replace({ pathname: "/journal/[id]", params: { id: journal_id } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      setUploadError(msg);
+      setScreen("viewfinder");
+    }
+  }, [journal_id, uploadSinglePhoto]);
+
+  // ── Reset batch state on unmount ───────────────────────
+
+  useEffect(() => {
+    return () => {
+      setBatchCount(0);
+      setStartPageNumber(null);
+    };
   }, []);
 
   const toggleFlash = useCallback(() => {
@@ -349,15 +409,34 @@ export default function CaptureScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Done button — appears once at least one page has been captured */}
+        {batchCount > 0 && (
+          <TouchableOpacity
+            style={[styles.doneBtn, { top: insets.top + 60 }]}
+            onPress={() => router.replace({ pathname: "/journal/[id]", params: { id: journal_id } })}
+          >
+            <Text style={styles.doneBtnText}>Done ({batchCount})</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Bottom controls */}
         <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 24 }]}>
-          {/* Spacer (future: gallery thumbnail) */}
-          <View style={{ width: 52 }} />
+          {/* Library picker */}
+          <TouchableOpacity style={styles.libraryBtn} onPress={pickAndUploadPhotos}>
+            <Feather name="image" size={22} color="#fff" />
+          </TouchableOpacity>
 
           {/* Shutter */}
-          <TouchableOpacity style={styles.shutter} onPress={capture} activeOpacity={0.85}>
-            <View style={styles.shutterInner} />
-          </TouchableOpacity>
+          <View style={{ alignItems: "center" }}>
+            <TouchableOpacity style={styles.shutter} onPress={capture} activeOpacity={0.85}>
+              <View style={styles.shutterInner} />
+            </TouchableOpacity>
+            {batchCount > 0 && (
+              <Text style={styles.batchBadge}>
+                {batchCount} page{batchCount !== 1 ? "s" : ""} added
+              </Text>
+            )}
+          </View>
 
           <View style={{ width: 52 }} />
         </View>
@@ -456,6 +535,32 @@ export default function CaptureScreen() {
     );
   }
 
+  // ── Batch uploading ────────────────────────────────────
+
+  if (screen === "batch_uploading") {
+    return (
+      <View style={styles.bg}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.uploadLabel}>
+            Uploading {batchProgress.current} of {batchProgress.total}…
+          </Text>
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressBar,
+                { width: batchProgress.total > 0 ? `${(batchProgress.current / batchProgress.total) * 100}%` : "0%" },
+              ]}
+            />
+          </View>
+          <Text style={styles.progressPct}>
+            {batchProgress.total > 0 ? Math.round((batchProgress.current / batchProgress.total) * 100) : 0}%
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return <View style={styles.bg} />;
 }
 
@@ -540,6 +645,40 @@ const styles = StyleSheet.create({
   flashLabel: {
     fontSize: 10,
     letterSpacing: 0.3,
+  },
+
+  // ── Done button ───────────────────────────────────────
+  doneBtn: {
+    position: "absolute",
+    right: 20,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 9,
+  },
+  doneBtnText: {
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+    color: "#1a1a1a",
+  },
+
+  // ── Batch badge ───────────────────────────────────────
+  batchBadge: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+    marginTop: 10,
+    textAlign: "center",
+  },
+
+  // ── Library button ────────────────────────────────────
+  libraryBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   // ── Bottom controls ───────────────────────────────────
