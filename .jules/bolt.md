@@ -1,0 +1,1 @@
+- **String lookups vs Array lookups:** In tight loops (like image processing or base64 decoding), avoid `String.prototype.indexOf`. Pre-computing an integer mapping table (like a `Uint8Array`) mapping character codes to their values and using `charCodeAt` yields significant performance improvements (e.g., ~11.7x faster in base64 to int decoding in React Native/Hermes context).
