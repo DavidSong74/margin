@@ -1,0 +1,1 @@
+- When dynamically injecting CSS in React components (such as Shadcn UI elements), avoid using `dangerouslySetInnerHTML` for `<style>` tags to prevent Cross-Site Scripting (XSS) vulnerabilities. Instead, pass the CSS string as direct children (`<style>{cssString}</style>`) to leverage React's automatic escaping.
