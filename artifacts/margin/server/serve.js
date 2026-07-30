@@ -45,6 +45,18 @@ function getAppName() {
   }
 }
 
+function getSafeHost(req) {
+  const hostStr = req.headers["x-forwarded-host"] || req.headers["host"];
+  if (typeof hostStr !== "string") return "localhost";
+  const firstHost = hostStr.split(",")[0].trim();
+  try {
+    const u = new URL(`http://${firstHost}`);
+    return u.host || "localhost";
+  } catch {
+    return "localhost";
+  }
+}
+
 function serveManifest(platform, res) {
   const manifestPath = path.join(STATIC_ROOT, platform, "manifest.json");
 
@@ -67,8 +79,8 @@ function serveManifest(platform, res) {
 
 function serveLandingPage(req, res, landingPageTemplate, appName) {
   const forwardedProto = req.headers["x-forwarded-proto"];
-  const protocol = forwardedProto || "https";
-  const host = req.headers["x-forwarded-host"] || req.headers["host"];
+  const protocol = typeof forwardedProto === "string" ? forwardedProto.split(",")[0].trim() : "https";
+  const host = getSafeHost(req);
   const baseUrl = `${protocol}://${host}`;
   const expsUrl = `${host}`;
 
@@ -108,7 +120,14 @@ const landingPageTemplate = fs.readFileSync(TEMPLATE_PATH, "utf-8");
 const appName = getAppName();
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url || "/", `http://${req.headers.host}`);
+  let url;
+  try {
+    url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  } catch {
+    res.writeHead(400);
+    res.end("Bad Request");
+    return;
+  }
   let pathname = url.pathname;
 
   if (basePath && pathname.startsWith(basePath)) {
