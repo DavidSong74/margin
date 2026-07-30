@@ -8,6 +8,7 @@
 // Auth: Bearer <user JWT> in Authorization header
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encodeBase64 } from "jsr:@std/encoding/base64";
 
 // ── Constants ──────────────────────────────────────────────
 
@@ -88,13 +89,7 @@ Deno.serve(async (req: Request) => {
     // Convert blob to base64
     const imageBuffer = await imageBlob.arrayBuffer();
     const imageBytes = new Uint8Array(imageBuffer);
-    // Spread operator crashes on large arrays; process in chunks instead
-    let binary = "";
-    const CHUNK = 8192;
-    for (let i = 0; i < imageBytes.length; i += CHUNK) {
-      binary += String.fromCharCode(...imageBytes.subarray(i, i + CHUNK));
-    }
-    const base64Image = btoa(binary);
+    const base64Image = encodeBase64(imageBytes);
 
     // ── 6. Fetch glossary (cap at 50 most-recently updated) ──
     const { data: glossaryRows } = await adminClient
