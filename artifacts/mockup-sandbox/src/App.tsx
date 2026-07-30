@@ -96,7 +96,7 @@ function getPreviewExamplePath(): string {
   return `${basePath}/preview/ComponentName`;
 }
 
-function Gallery() {
+function Gallery({ modules }: { modules: ModuleMap }) {
   const basePath = getBasePath();
   const componentPaths = Object.keys(modules).map((key) =>
     key.replace("./components/mockups/", "").replace(".tsx", ""),
@@ -172,7 +172,7 @@ function App() {
     );
   }
 
-  return <Gallery />;
+  return <Gallery modules={discoveredModules} />;
 }
 
 export default App;
