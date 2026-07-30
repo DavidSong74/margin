@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
+import { useTheme, type ThemeOption } from "@/hooks/useTheme";
 import { supabase } from "@/lib/supabase";
 
 // ─── Reusable primitives ─────────────────────────────────────────────────────
@@ -183,8 +184,6 @@ function ToggleRow({
 }
 
 // ─── Theme picker ─────────────────────────────────────────────────────────────
-
-type ThemeOption = "light" | "dark" | "system";
 
 function ThemeRow({ value, onChange }: { value: ThemeOption; onChange: (v: ThemeOption) => void }) {
   const colors = useColors();
@@ -401,7 +400,6 @@ type Prefs = {
   iCloudBackup: boolean;
   driveBackup: boolean;
   appLock: boolean;
-  theme: ThemeOption;
   coverColor: string;
 };
 
@@ -412,7 +410,6 @@ const DEFAULT_PREFS: Prefs = {
   iCloudBackup: true,
   driveBackup: false,
   appLock: false,
-  theme: "system",
   coverColor: COVER_COLORS[0],
 };
 
@@ -420,6 +417,7 @@ const DEFAULT_PREFS: Prefs = {
 
 export default function ProfileScreen() {
   const colors = useColors();
+  const { theme, setTheme: setThemeGlobal } = useTheme();
   const insets = useSafeAreaInsets();
 
   const pt = Platform.OS === "web" ? 67 : insets.top;
@@ -437,7 +435,6 @@ export default function ProfileScreen() {
   const [iCloudBackup, setICloudBackup] = useState(DEFAULT_PREFS.iCloudBackup);
   const [driveBackup, setDriveBackup] = useState(DEFAULT_PREFS.driveBackup);
   const [appLock, setAppLock] = useState(DEFAULT_PREFS.appLock);
-  const [theme, setTheme] = useState<ThemeOption>(DEFAULT_PREFS.theme);
   const [coverColor, setCoverColor] = useState(DEFAULT_PREFS.coverColor);
 
   // Load user session
@@ -464,7 +461,6 @@ export default function ProfileScreen() {
         if (stored.iCloudBackup !== undefined) setICloudBackup(stored.iCloudBackup);
         if (stored.driveBackup !== undefined) setDriveBackup(stored.driveBackup);
         if (stored.appLock !== undefined) setAppLock(stored.appLock);
-        if (stored.theme !== undefined) setTheme(stored.theme);
         if (stored.coverColor !== undefined) setCoverColor(stored.coverColor);
       }
       setPrefsLoaded(true);
@@ -474,7 +470,7 @@ export default function ProfileScreen() {
   function savePref(patch: Partial<Prefs>) {
     const current: Prefs = {
       dailyReminder, onThisDay, weeklyDigest,
-      iCloudBackup, driveBackup, appLock, theme, coverColor,
+      iCloudBackup, driveBackup, appLock, coverColor,
     };
     AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...patch }));
   }
@@ -638,7 +634,7 @@ export default function ProfileScreen() {
       {/* ── Appearance ── */}
       <SectionHeader label="Appearance" />
       <SectionCard>
-        <ThemeRow value={theme} onChange={(v) => { setTheme(v); savePref({ theme: v }); }} />
+        <ThemeRow value={theme} onChange={(v) => setThemeGlobal(v)} />
         <CoverColorRow value={coverColor} onChange={(v) => { setCoverColor(v); savePref({ coverColor: v }); }} />
       </SectionCard>
 

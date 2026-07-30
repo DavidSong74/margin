@@ -23,6 +23,14 @@ import { decode } from "base64-arraybuffer";
 
 import { supabase } from "@/lib/supabase";
 
+// ── Pre-computed Base64 map for fast decoding ─────────────
+
+const B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const B64_MAP = new Uint8Array(256);
+for (let i = 0; i < B64_CHARS.length; i++) {
+  B64_MAP[B64_CHARS.charCodeAt(i)] = i;
+}
+
 // ── Types ─────────────────────────────────────────────────
 
 type ScreenState = "permission" | "viewfinder" | "preview" | "uploading" | "batch_uploading";
@@ -128,17 +136,16 @@ export default function CaptureScreen() {
       if (!thumb.base64) return null;
 
       // Decode base64 without atob (not available on Hermes/Android)
-      const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
       const b64 = thumb.base64.replace(/=/g, "");
       let totalLuminance = 0;
       let pixelCount = 0;
       // Decode 4 base64 chars → 3 bytes, sample RGB triplets for luminance
       for (let i = 0; i + 3 < b64.length; i += 4) {
         const n =
-          (B64.indexOf(b64[i]) << 18) |
-          (B64.indexOf(b64[i + 1]) << 12) |
-          (B64.indexOf(b64[i + 2]) << 6) |
-          B64.indexOf(b64[i + 3]);
+          (B64_MAP[b64.charCodeAt(i)] << 18) |
+          (B64_MAP[b64.charCodeAt(i + 1)] << 12) |
+          (B64_MAP[b64.charCodeAt(i + 2)] << 6) |
+          B64_MAP[b64.charCodeAt(i + 3)];
         const r = (n >> 16) & 0xff;
         const g = (n >> 8) & 0xff;
         const b = n & 0xff;
@@ -192,7 +199,7 @@ export default function CaptureScreen() {
     if (insertErr) throw insertErr;
 
     supabase.functions
-      .invoke("transcribe", { body: { page_id: pageId, image_path: imagePath } })
+      .invoke("transcribe", { body: { page_id: pageId } })
       .catch((err) => console.warn("[transcribe] invoke failed:", err));
   }, [journal_id]);
 
