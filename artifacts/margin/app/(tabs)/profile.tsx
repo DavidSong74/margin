@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   Alert,
+  type DimensionValue,
   Platform,
   ScrollView,
   StyleSheet,
@@ -57,7 +58,7 @@ function Divider() {
 }
 
 interface RowProps {
-  icon: string;
+  icon: React.ComponentProps<typeof Feather>["name"];
   iconColor?: string;
   label: string;
   value?: string;
@@ -104,7 +105,7 @@ function Row({
             },
           ]}
         >
-          <Feather name={icon as any} size={15} color={ic} />
+          <Feather name={icon} size={15} color={ic} />
         </View>
 
         {/* Label */}
@@ -368,7 +369,7 @@ function StorageRow() {
               style={[
                 styles.storageFill,
                 {
-                  width: `${pct * 100}%` as any,
+                  width: `${pct * 100}%` as DimensionValue,
                   backgroundColor: colors.primary,
                 },
               ]}
