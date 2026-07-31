@@ -4,7 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView, useCameraPermissions, type CameraType, type FlashMode } from "expo-camera";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
@@ -21,6 +21,7 @@ import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decode } from "base64-arraybuffer";
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 
 // ── Pre-computed Base64 map for fast decoding ─────────────
@@ -198,9 +199,12 @@ export default function CaptureScreen() {
     });
     if (insertErr) throw insertErr;
 
-    supabase.functions
-      .invoke("transcribe", { body: { page_id: pageId } })
-      .catch((err) => console.warn("[transcribe] invoke failed:", err));
+    AsyncStorage.getItem("margin:settings").then((raw) => {
+      const quality = raw ? (JSON.parse(raw).transcriptionQuality ?? "balanced") : "balanced";
+      supabase.functions
+        .invoke("transcribe", { body: { page_id: pageId, quality } })
+        .catch((err) => console.warn("[transcribe] invoke failed:", err));
+    });
   }, [journal_id]);
 
   // ── Upload ─────────────────────────────────────────────
@@ -308,7 +312,7 @@ export default function CaptureScreen() {
   }, []);
 
   const toggleFlash = useCallback(() => {
-    setFlash((f) => (f === "off" ? "on" : f === "on" ? "auto" : "off"));
+    setFlash((f: FlashMode) => (f === "off" ? "on" : f === "on" ? "auto" : "off"));
   }, []);
 
   const flashIcon = flash === "on" ? "zap" : flash === "auto" ? "zap" : "zap-off";

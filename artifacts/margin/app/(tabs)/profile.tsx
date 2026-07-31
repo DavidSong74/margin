@@ -1,16 +1,23 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
+import * as LocalAuthentication from "expo-local-authentication";
+import * as Sharing from "expo-sharing";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   type DimensionValue,
+  Linking,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -163,7 +170,7 @@ function ToggleRow({
   const colors = useColors();
   return (
     <Row
-      icon={icon}
+      icon={icon as React.ComponentProps<typeof Feather>["name"]}
       iconColor={iconColor}
       label={label}
       chevron={false}
@@ -331,8 +338,8 @@ function CoverColorRow({
 
 function StorageRow() {
   const colors = useColors();
-  const used = 2.4;
-  const total = 15;
+  const used = 2.4;   // STUB — replace with real query once §9 approach is decided
+  const total = 15;   // STUB — replace with real plan limit if you add paid tiers
   const pct = used / total;
 
   return (
@@ -394,6 +401,8 @@ function StorageRow() {
 
 const PREFS_KEY = "margin:settings";
 
+type TranscriptionQuality = "standard" | "balanced" | "best";
+
 type Prefs = {
   dailyReminder: boolean;
   onThisDay: boolean;
@@ -402,6 +411,7 @@ type Prefs = {
   driveBackup: boolean;
   appLock: boolean;
   coverColor: string;
+  transcriptionQuality: TranscriptionQuality;
 };
 
 const DEFAULT_PREFS: Prefs = {
@@ -412,6 +422,7 @@ const DEFAULT_PREFS: Prefs = {
   driveBackup: false,
   appLock: false,
   coverColor: COVER_COLORS[0],
+  transcriptionQuality: "balanced",
 };
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
@@ -437,6 +448,17 @@ export default function ProfileScreen() {
   const [driveBackup, setDriveBackup] = useState(DEFAULT_PREFS.driveBackup);
   const [appLock, setAppLock] = useState(DEFAULT_PREFS.appLock);
   const [coverColor, setCoverColor] = useState(DEFAULT_PREFS.coverColor);
+  const [transcriptionQuality, setTranscriptionQuality] = useState<TranscriptionQuality>(
+    DEFAULT_PREFS.transcriptionQuality,
+  );
+
+  // §5: Change password modal
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordLoading, setPasswordLoading] = useState(false);
+
+  // §8: Cache size
+  const [cacheSize, setCacheSize] = useState("...");
 
   // Load user session
   useEffect(() => {
@@ -463,18 +485,150 @@ export default function ProfileScreen() {
         if (stored.driveBackup !== undefined) setDriveBackup(stored.driveBackup);
         if (stored.appLock !== undefined) setAppLock(stored.appLock);
         if (stored.coverColor !== undefined) setCoverColor(stored.coverColor);
+        if (stored.transcriptionQuality !== undefined)
+          setTranscriptionQuality(stored.transcriptionQuality);
       }
       setPrefsLoaded(true);
+    });
+  }, []);
+
+  // §8: Measure cache size on mount
+  useEffect(() => {
+    if (!FileSystem.cacheDirectory) return;
+    FileSystem.getInfoAsync(FileSystem.cacheDirectory).then((info) => {
+      if (info.exists && "size" in info && info.size) {
+        const mb = info.size / 1024 / 1024;
+        setCacheSize(mb < 1 ? `${(info.size / 1024).toFixed(0)} KB` : `${mb.toFixed(0)} MB`);
+      } else {
+        setCacheSize("0 MB");
+      }
     });
   }, []);
 
   function savePref(patch: Partial<Prefs>) {
     const current: Prefs = {
       dailyReminder, onThisDay, weeklyDigest,
-      iCloudBackup, driveBackup, appLock, coverColor,
+      iCloudBackup, driveBackup, appLock, coverColor, transcriptionQuality,
     };
     AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...patch }));
   }
+
+  // ── §4: App lock ──────────────────────────────────────────────────────────
+
+  async function handleAppLockChange(v: boolean) {
+    if (v) {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!hasHardware || !isEnrolled) {
+        Alert.alert("Not available", "No biometrics are enrolled on this device.");
+        return;
+      }
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: "Enable app lock",
+        fallbackLabel: "Use passcode",
+      });
+      if (!result.success) return;
+    }
+    setAppLock(v);
+    savePref({ appLock: v });
+  }
+
+  // ── §5: Change password ───────────────────────────────────────────────────
+
+  async function handleChangePassword() {
+    if (newPassword.length < 8) {
+      Alert.alert("Too short", "Password must be at least 8 characters.");
+      return;
+    }
+    setPasswordLoading(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setPasswordLoading(false);
+    if (error) {
+      Alert.alert("Error", error.message);
+    } else {
+      Alert.alert("Done", "Your password has been updated.");
+      setNewPassword("");
+      setShowPasswordModal(false);
+    }
+  }
+
+  // ── §7: Export full archive ───────────────────────────────────────────────
+
+  async function handleExport() {
+    Alert.alert(
+      "Export archive",
+      "Creates a text file with all journal transcriptions.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Export",
+          onPress: async () => {
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (!session) return;
+
+              const { data: pages } = await supabase
+                .from("pages")
+                .select("page_number, transcription_text, journals!inner(title, user_id)")
+                .eq("journals.user_id", session.user.id)
+                .order("page_number");
+
+              if (!pages?.length) {
+                Alert.alert("Nothing to export", "You have no journal pages yet.");
+                return;
+              }
+
+              let content = "Margin — Journal Export\n";
+              content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
+              for (const page of pages) {
+                content += `--- Page ${page.page_number} ---\n`;
+                content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
+              }
+
+              const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? "";
+              const filePath = dir + "margin_export.txt";
+              await FileSystem.writeAsStringAsync(filePath, content);
+
+              if (await Sharing.isAvailableAsync()) {
+                await Sharing.shareAsync(filePath, {
+                  mimeType: "text/plain",
+                  UTI: "public.plain-text",
+                });
+              } else {
+                Alert.alert("Sharing not available", "Your device doesn't support sharing files.");
+              }
+            } catch (e) {
+              Alert.alert("Export failed", e instanceof Error ? e.message : String(e));
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  // ── §8: Clear cached images ───────────────────────────────────────────────
+
+  async function handleClearCache() {
+    Alert.alert(
+      "Clear cache",
+      "Removes cached image data. Your journals and transcriptions are unaffected.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            if (FileSystem.cacheDirectory) {
+              await FileSystem.deleteAsync(FileSystem.cacheDirectory, { idempotent: true });
+            }
+            setCacheSize("0 MB");
+          },
+        },
+      ],
+    );
+  }
+
+  // ── Sign out ──────────────────────────────────────────────────────────────
 
   function handleSignOut() {
     Alert.alert(
@@ -497,175 +651,274 @@ export default function ProfileScreen() {
   if (!prefsLoaded) return <View style={[styles.root, { backgroundColor: colors.background }]} />;
 
   return (
-    <ScrollView
-      style={[styles.root, { backgroundColor: colors.background }]}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: pt + 16, paddingBottom: pb },
-      ]}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* ── Profile header ── */}
-      <View style={styles.profileHeader}>
-        <View style={[styles.avatarLarge, { backgroundColor: colors.primary }]}>
-          <Text
-            style={[styles.avatarLargeText, { fontFamily: "Inter_700Bold" }]}
-          >
-            {displayName.charAt(0).toUpperCase() || "?"}
-          </Text>
-        </View>
-        <Text
-          style={[
-            styles.profileName,
-            { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" },
-          ]}
-        >
-          {displayName || userEmail}
-        </Text>
-        <Text
-          style={[
-            styles.profileEmail,
-            { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-          ]}
-        >
-          {userEmail}
-        </Text>
-      </View>
-
-      {/* ── Account ── */}
-      <SectionHeader label="Account" />
-      <SectionCard>
-        <Row icon="lock" label="Change password" />
-        <Row
-          icon="log-out"
-          label="Sign out"
-          destructive
-          chevron={false}
-          last
-          onPress={handleSignOut}
-        />
-      </SectionCard>
-
-      {/* ── Notifications ── */}
-      <SectionHeader label="Notifications" />
-      <SectionCard>
-        <ToggleRow
-          icon="bell"
-          label="Daily writing reminder"
-          value={dailyReminder}
-          onChange={(v) => { setDailyReminder(v); savePref({ dailyReminder: v }); }}
-        />
-        {dailyReminder && (
-          <>
-            <Row
-              icon="clock"
-              label="Reminder time"
-              value="9:00 PM"
-              chevron={false}
-              last={false}
-            />
-          </>
-        )}
-        <ToggleRow
-          icon="calendar"
-          label={"On this day"}
-          value={onThisDay}
-          onChange={(v) => { setOnThisDay(v); savePref({ onThisDay: v }); }}
-        />
-        {onThisDay && (
-          <View style={styles.infoRow}>
+    <>
+      <ScrollView
+        style={[styles.root, { backgroundColor: colors.background }]}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: pt + 16, paddingBottom: pb },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Profile header ── */}
+        <View style={styles.profileHeader}>
+          <View style={[styles.avatarLarge, { backgroundColor: colors.primary }]}>
             <Text
-              style={[
-                styles.infoText,
-                { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-              ]}
+              style={[styles.avatarLargeText, { fontFamily: "Inter_700Bold" }]}
             >
-              Resurfaces a journal entry from exactly one year ago — a favourite feature of journalers.
+              {displayName.charAt(0).toUpperCase() || "?"}
             </Text>
           </View>
-        )}
-        <ToggleRow
-          icon="mail"
-          label="Weekly digest"
-          value={weeklyDigest}
-          onChange={(v) => { setWeeklyDigest(v); savePref({ weeklyDigest: v }); }}
-          last
-        />
-      </SectionCard>
+          <Text
+            style={[
+              styles.profileName,
+              { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" },
+            ]}
+          >
+            {displayName || userEmail}
+          </Text>
+          <Text
+            style={[
+              styles.profileEmail,
+              { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+            ]}
+          >
+            {userEmail}
+          </Text>
+        </View>
 
-      {/* ── Storage & Backup ── */}
-      <SectionHeader label="Storage & Backup" />
-      <SectionCard>
-        <StorageRow />
-        <ToggleRow
-          icon="cloud"
-          label="iCloud backup"
-          value={iCloudBackup}
-          onChange={(v) => { setICloudBackup(v); savePref({ iCloudBackup: v }); }}
-        />
-        <ToggleRow
-          icon="cloud"
-          iconColor="#4285F4"
-          label="Google Drive backup"
-          value={driveBackup}
-          onChange={(v) => { setDriveBackup(v); savePref({ driveBackup: v }); }}
-        />
-        <Row icon="download" label="Export full archive" value="ZIP / PDF" />
-        <Row
-          icon="trash-2"
-          label="Clear cached images"
-          value="340 MB"
-          last
-          destructive
-        />
-      </SectionCard>
+        {/* ── Account ── */}
+        <SectionHeader label="Account" />
+        <SectionCard>
+          <Row
+            icon="lock"
+            label="Change password"
+            onPress={() => setShowPasswordModal(true)}
+          />
+          <Row
+            icon="log-out"
+            label="Sign out"
+            destructive
+            chevron={false}
+            last
+            onPress={handleSignOut}
+          />
+        </SectionCard>
 
-      {/* ── Privacy & Security ── */}
-      <SectionHeader label="Privacy & Security" />
-      <SectionCard>
-        <ToggleRow
-          icon="shield"
-          label="App lock (Face ID / Touch ID)"
-          value={appLock}
-          onChange={(v) => { setAppLock(v); savePref({ appLock: v }); }}
-        />
-        <Row icon="eye-off" label="Per-journal privacy" last />
-      </SectionCard>
+        {/* ── Notifications ── */}
+        <SectionHeader label="Notifications" />
+        <SectionCard>
+          <ToggleRow
+            icon="bell"
+            label="Daily writing reminder"
+            value={dailyReminder}
+            onChange={(v) => { setDailyReminder(v); savePref({ dailyReminder: v }); }}
+          />
+          {dailyReminder && (
+            <>
+              <Row
+                icon="clock"
+                label="Reminder time"
+                value="9:00 PM"
+                chevron={false}
+                last={false}
+              />
+            </>
+          )}
+          <ToggleRow
+            icon="calendar"
+            label={"On this day"}
+            value={onThisDay}
+            onChange={(v) => { setOnThisDay(v); savePref({ onThisDay: v }); }}
+          />
+          {onThisDay && (
+            <View style={styles.infoRow}>
+              <Text
+                style={[
+                  styles.infoText,
+                  { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+                ]}
+              >
+                Resurfaces a journal entry from exactly one year ago — a favourite feature of journalers.
+              </Text>
+            </View>
+          )}
+          <ToggleRow
+            icon="mail"
+            label="Weekly digest"
+            value={weeklyDigest}
+            onChange={(v) => { setWeeklyDigest(v); savePref({ weeklyDigest: v }); }}
+            last
+          />
+        </SectionCard>
 
-      {/* ── Appearance ── */}
-      <SectionHeader label="Appearance" />
-      <SectionCard>
-        <ThemeRow value={theme} onChange={(v) => setThemeGlobal(v)} />
-        <CoverColorRow value={coverColor} onChange={(v) => { setCoverColor(v); savePref({ coverColor: v }); }} />
-      </SectionCard>
+        {/* ── Storage & Backup ── */}
+        <SectionHeader label="Storage & Backup" />
+        <SectionCard>
+          <StorageRow />
+          <ToggleRow
+            icon="cloud"
+            label="iCloud backup"
+            value={iCloudBackup}
+            onChange={(v) => { setICloudBackup(v); savePref({ iCloudBackup: v }); }}
+          />
+          <ToggleRow
+            icon="cloud"
+            iconColor="#4285F4"
+            label="Google Drive backup"
+            value={driveBackup}
+            onChange={(v) => { setDriveBackup(v); savePref({ driveBackup: v }); }}
+          />
+          <Row
+            icon="download"
+            label="Export full archive"
+            value="Text / PDF"
+            onPress={handleExport}
+          />
+          <Row
+            icon="trash-2"
+            label="Clear cached images"
+            value={cacheSize}
+            last
+            destructive
+            onPress={handleClearCache}
+          />
+        </SectionCard>
 
-      {/* ── Journaling ── */}
-      <SectionHeader label="Journaling" />
-      <SectionCard>
-        <Row icon="settings" label="New journal defaults" />
-        <Row
-          icon="cpu"
-          label="AI transcription quality"
-          value="Balanced"
-          last
-        />
-      </SectionCard>
+        {/* ── Privacy & Security ── */}
+        <SectionHeader label="Privacy & Security" />
+        <SectionCard>
+          <ToggleRow
+            icon="shield"
+            label="App lock (Face ID / Touch ID)"
+            value={appLock}
+            onChange={handleAppLockChange}
+          />
+          <Row icon="eye-off" label="Per-journal privacy" last />
+        </SectionCard>
 
-      {/* ── App ── */}
-      <SectionHeader label="App" />
-      <SectionCard>
-        <Row icon="star" label="Rate Margin" />
-        <Row icon="message-circle" label="Send feedback" />
-        <Row icon="help-circle" label="Help & FAQ" />
-        <Row
-          icon="info"
-          label="Version"
-          value="1.0.0"
-          chevron={false}
-          last
-        />
-      </SectionCard>
-    </ScrollView>
+        {/* ── Appearance ── */}
+        <SectionHeader label="Appearance" />
+        <SectionCard>
+          <ThemeRow value={theme} onChange={(v) => setThemeGlobal(v)} />
+          <CoverColorRow value={coverColor} onChange={(v) => { setCoverColor(v); savePref({ coverColor: v }); }} />
+        </SectionCard>
+
+        {/* ── Journaling ── */}
+        <SectionHeader label="Journaling" />
+        <SectionCard>
+          <Row icon="settings" label="New journal defaults" />
+          <Row
+            icon="cpu"
+            label="AI transcription quality"
+            value={transcriptionQuality.charAt(0).toUpperCase() + transcriptionQuality.slice(1)}
+            last
+            onPress={() => {
+              const options: { key: TranscriptionQuality; label: string }[] = [
+                { key: "standard", label: "Standard — faster" },
+                { key: "balanced", label: "Balanced — default" },
+                { key: "best", label: "Best — highest accuracy" },
+              ];
+              Alert.alert(
+                "Transcription quality",
+                "Affects how carefully Gemini reads your handwriting.",
+                [
+                  ...options.map((o) => ({
+                    text: o.label + (o.key === transcriptionQuality ? " ✓" : ""),
+                    onPress: () => {
+                      setTranscriptionQuality(o.key);
+                      savePref({ transcriptionQuality: o.key });
+                    },
+                  })),
+                  { text: "Cancel", style: "cancel" as const },
+                ],
+              );
+            }}
+          />
+        </SectionCard>
+
+        {/* ── App ── */}
+        <SectionHeader label="App" />
+        <SectionCard>
+          <Row
+            icon="star"
+            label="Rate Margin"
+            onPress={() => {
+              // TODO for you: replace with your App Store link once published
+              Linking.openURL("https://apps.apple.com/app/idTODO");
+            }}
+          />
+          <Row
+            icon="message-circle"
+            label="Send feedback"
+            onPress={() => {
+              // TODO for you: replace with your feedback email or form URL
+              Linking.openURL("mailto:feedback@margin.app?subject=Margin%20Feedback");
+            }}
+          />
+          <Row
+            icon="help-circle"
+            label="Help & FAQ"
+            onPress={() => {
+              // TODO for you: replace with your help center URL
+              Linking.openURL("https://margin.app/help");
+            }}
+          />
+          <Row
+            icon="info"
+            label="Version"
+            value="1.0.0"
+            chevron={false}
+            last
+          />
+        </SectionCard>
+      </ScrollView>
+
+      {/* ── §5: Change password modal ── */}
+      <Modal
+        visible={showPasswordModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPasswordModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
+              Change password
+            </Text>
+            <TextInput
+              value={newPassword}
+              onChangeText={setNewPassword}
+              placeholder="New password (min 8 characters)"
+              secureTextEntry
+              autoFocus
+              placeholderTextColor={colors.mutedForeground}
+              style={[
+                styles.modalInput,
+                { color: colors.foreground, borderColor: colors.border, fontFamily: "Inter_400Regular" },
+              ]}
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                onPress={() => { setShowPasswordModal(false); setNewPassword(""); }}
+                style={styles.modalCancelBtn}
+              >
+                <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_400Regular" }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleChangePassword}
+                disabled={passwordLoading}
+                style={[styles.modalConfirmBtn, { backgroundColor: colors.primary }]}
+              >
+                {passwordLoading
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={{ color: "#fff", fontFamily: "Inter_600SemiBold" }}>Update</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -781,4 +1034,41 @@ const styles = StyleSheet.create({
   },
   storageFill: { height: 6, borderRadius: 3 },
   storageSub: { fontSize: 11, opacity: 0.8 },
+
+  // ── §5: Password modal ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  modalCard: {
+    width: "100%",
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 20,
+    gap: 16,
+  },
+  modalTitle: { fontSize: 17 },
+  modalInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+  },
+  modalCancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
+  modalConfirmBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    minWidth: 80,
+  },
 });

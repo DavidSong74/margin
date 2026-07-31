@@ -40,9 +40,11 @@ Deno.serve(async (req: Request) => {
 
   // ── 2. Parse body ────────────────────────────────────────
   let page_id: string;
+  let quality: "standard" | "balanced" | "best";
   try {
     const body = await req.json();
     page_id = body.page_id;
+    quality = body.quality ?? "balanced";
     if (!page_id) throw new Error("missing fields");
   } catch {
     return json({ error: "Invalid request body — expected { page_id }" }, 400);
@@ -105,10 +107,18 @@ Deno.serve(async (req: Request) => {
         : "";
 
     // ── 7. First Gemini pass — full transcription ───────────
+    const qualityInstruction =
+      quality === "standard"
+        ? "Prioritize speed. Transcribe clearly legible words only; skip anything ambiguous."
+        : quality === "best"
+        ? "Prioritize accuracy above all else. Re-read every word using surrounding context clues before committing. Do not skip uncertain words — make your best inference."
+        : "";
+
     const systemInstructions = [
       "You are an expert at transcribing handwritten text from journal pages.",
       "Transcribe all visible handwritten text exactly as written, preserving line breaks.",
       "Return ONLY the transcribed text — no commentary, no formatting, no markdown.",
+      qualityInstruction,
       glossaryHint,
     ]
       .filter(Boolean)

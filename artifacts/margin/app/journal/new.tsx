@@ -1,9 +1,10 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { decode } from "base64-arraybuffer";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -46,6 +47,16 @@ export default function NewJournalScreen() {
   const [step, setStep] = useState<1 | 2>(1);
   const [title, setTitle] = useState("");
   const [selectedColor, setSelectedColor] = useState<string>(COVER_COLORS[0].hex);
+
+  // §2: Apply saved default cover color on mount
+  useEffect(() => {
+    AsyncStorage.getItem("margin:settings").then((raw) => {
+      if (!raw) return;
+      const prefs = JSON.parse(raw);
+      if (prefs.coverColor) setSelectedColor(prefs.coverColor);
+    });
+  }, []);
+
   const [photoCoverUri, setPhotoCoverUri] = useState<string | null>(null);
   const [coverIsPhoto, setCoverIsPhoto] = useState(false);
   const [saving, setSaving] = useState(false);
