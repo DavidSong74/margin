@@ -49,6 +49,170 @@ type CorrDecision =
   | { kind: "skipped" }
   | { kind: "saved"; corrected: string };
 
+// ── PageItem Component ───────────────────────────────────────
+
+interface PageItemProps {
+  page: JournalPage;
+  index: number;
+  effectiveW: number;
+  editMode: boolean;
+  contentView: ContentView;
+  colors: ReturnType<typeof useColors>;
+  updatePageText: (index: number, text: string) => void;
+  openCorrectionModal: (index: number) => void;
+}
+
+const PageItem = React.memo(({
+  page,
+  index,
+  effectiveW,
+  editMode,
+  contentView,
+  colors,
+  updatePageText,
+  openCorrectionModal,
+}: PageItemProps) => {
+  return (
+    <View style={{ width: effectiveW }}>
+      <View style={styles.pageCenter}>
+        <View style={[styles.pageColumn, { maxWidth: MAX_CONTENT_W }]}>
+          {/* ── Original image view ────────────────── */}
+          {!editMode && contentView === "original" ? (
+            <ScrollView
+              contentContainerStyle={styles.scrollPad}
+              showsVerticalScrollIndicator={false}
+            >
+              {page.signedImageUrl ? (
+                <Image
+                  source={{ uri: page.signedImageUrl }}
+                  style={[
+                    styles.originalImage,
+                    { borderColor: colors.border },
+                  ]}
+                  resizeMode="contain"
+                  accessibilityLabel={`Original handwritten photo of page ${index + 1}`}
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.originalImage,
+                    styles.imagePlaceholder,
+                    { borderColor: colors.border, backgroundColor: colors.muted },
+                  ]}
+                >
+                  <Feather name="image" size={40} color={colors.mutedForeground} />
+                  <Text
+                    style={[
+                      styles.imagePlaceholderText,
+                      { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+                    ]}
+                  >
+                    Image unavailable
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+
+          /* ── Edit mode ─────────────────────────── */
+          ) : editMode ? (
+            <ScrollView
+              contentContainerStyle={styles.scrollPad}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <TextInput
+                style={[
+                  styles.pageText,
+                  styles.pageInput,
+                  {
+                    color: "#4a3f35",
+                    backgroundColor: "#faf7f2",
+                    fontFamily: "PlayfairDisplay_400Regular",
+                  },
+                ]}
+                value={page.transcriptionText ?? ""}
+                onChangeText={(text) => updatePageText(index, text)}
+                multiline
+                textAlignVertical="top"
+                accessibilityLabel={`Edit text for page ${index + 1}`}
+              />
+            </ScrollView>
+
+          /* ── Transcription read view ───────────── */
+          ) : (
+            <ScrollView
+              contentContainerStyle={styles.scrollPad}
+              showsVerticalScrollIndicator={false}
+            >
+              {/* Review badge */}
+              {page.correctionCount > 0 && (
+                <TouchableOpacity
+                  style={[
+                    styles.reviewBadge,
+                    { backgroundColor: colors.primary },
+                  ]}
+                  onPress={() => openCorrectionModal(index)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${page.correctionCount} words to review on this page`}
+                >
+                  <Feather name="edit-3" size={12} color="#fff" />
+                  <Text
+                    style={[
+                      styles.reviewBadgeText,
+                      { fontFamily: "Inter_600SemiBold" },
+                    ]}
+                  >
+                    {page.correctionCount} to review
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Transcription status indicators */}
+              {page.transcriptionStatus === "pending" ||
+              page.transcriptionStatus === "processing" ? (
+                <View style={styles.transcribingWrap}>
+                  <ActivityIndicator
+                    size="small"
+                    color={colors.primary}
+                  />
+                  <Text
+                    style={[
+                      styles.transcribingText,
+                      { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+                    ]}
+                  >
+                    Transcribing…
+                  </Text>
+                </View>
+              ) : page.transcriptionStatus === "failed" ? (
+                <Text
+                  style={[
+                    styles.pageText,
+                    { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+                  ]}
+                >
+                  Transcription failed. Switch to Original view to see
+                  the photo.
+                </Text>
+              ) : (
+                <Text
+                  style={[
+                    styles.pageText,
+                    { color: "#4a3f35", fontFamily: "PlayfairDisplay_400Regular" },
+                  ]}
+                  accessibilityLabel={`Transcription of page ${index + 1}`}
+                >
+                  {page.transcriptionText ?? ""}
+                </Text>
+              )}
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+});
+
 // ── Screen ─────────────────────────────────────────────────────
 
 export default function JournalReaderScreen() {
@@ -186,14 +350,14 @@ export default function JournalReaderScreen() {
   // ── Edit mode ────────────────────────────────────────────────
 
   const updatePageText = useCallback(
-    (text: string) => {
+    (index: number, text: string) => {
       setPages((prev) =>
         prev.map((p, i) =>
-          i === currentPage ? { ...p, transcriptionText: text } : p
+          i === index ? { ...p, transcriptionText: text } : p
         )
       );
     },
-    [currentPage]
+    []
   );
 
   const saveTranscriptionEdit = useCallback(async () => {
@@ -300,6 +464,30 @@ export default function JournalReaderScreen() {
       }
     },
     [corrModalPageIdx, corrModalCorrIdx, pages, finishCorrectionSession]
+  );
+
+  // ── Render Item ──────────────────────────────────────────────
+  const renderItem = useCallback(
+    ({ item: page, index }: { item: JournalPage; index: number }) => (
+      <PageItem
+        page={page}
+        index={index}
+        effectiveW={effectiveW}
+        editMode={editMode}
+        contentView={contentView}
+        colors={colors}
+        updatePageText={updatePageText}
+        openCorrectionModal={openCorrectionModal}
+      />
+    ),
+    [
+      effectiveW,
+      editMode,
+      contentView,
+      colors,
+      updatePageText,
+      openCorrectionModal,
+    ]
   );
 
   // ── Computed values ──────────────────────────────────────────
@@ -551,145 +739,7 @@ export default function JournalReaderScreen() {
           initialNumToRender={3}
           maxToRenderPerBatch={2}
           removeClippedSubviews={false}
-          renderItem={({ item: page, index }) => (
-            <View style={{ width: effectiveW }}>
-              <View style={styles.pageCenter}>
-                <View style={[styles.pageColumn, { maxWidth: MAX_CONTENT_W }]}>
-                  {/* ── Original image view ────────────────── */}
-                  {!editMode && contentView === "original" ? (
-                    <ScrollView
-                      contentContainerStyle={styles.scrollPad}
-                      showsVerticalScrollIndicator={false}
-                    >
-                      {page.signedImageUrl ? (
-                        <Image
-                          source={{ uri: page.signedImageUrl }}
-                          style={[
-                            styles.originalImage,
-                            { borderColor: colors.border },
-                          ]}
-                          resizeMode="contain"
-                          accessibilityLabel={`Original handwritten photo of page ${index + 1}`}
-                        />
-                      ) : (
-                        <View
-                          style={[
-                            styles.originalImage,
-                            styles.imagePlaceholder,
-                            { borderColor: colors.border, backgroundColor: colors.muted },
-                          ]}
-                        >
-                          <Feather name="image" size={40} color={colors.mutedForeground} />
-                          <Text
-                            style={[
-                              styles.imagePlaceholderText,
-                              { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-                            ]}
-                          >
-                            Image unavailable
-                          </Text>
-                        </View>
-                      )}
-                    </ScrollView>
-
-                  /* ── Edit mode ─────────────────────────── */
-                  ) : editMode ? (
-                    <ScrollView
-                      contentContainerStyle={styles.scrollPad}
-                      keyboardShouldPersistTaps="handled"
-                      showsVerticalScrollIndicator={false}
-                    >
-                      <TextInput
-                        style={[
-                          styles.pageText,
-                          styles.pageInput,
-                          {
-                            color: "#4a3f35",
-                            backgroundColor: "#faf7f2",
-                            fontFamily: "PlayfairDisplay_400Regular",
-                          },
-                        ]}
-                        value={page.transcriptionText ?? ""}
-                        onChangeText={updatePageText}
-                        multiline
-                        textAlignVertical="top"
-                        accessibilityLabel={`Edit text for page ${index + 1}`}
-                      />
-                    </ScrollView>
-
-                  /* ── Transcription read view ───────────── */
-                  ) : (
-                    <ScrollView
-                      contentContainerStyle={styles.scrollPad}
-                      showsVerticalScrollIndicator={false}
-                    >
-                      {/* Review badge */}
-                      {page.correctionCount > 0 && (
-                        <TouchableOpacity
-                          style={[
-                            styles.reviewBadge,
-                            { backgroundColor: colors.primary },
-                          ]}
-                          onPress={() => openCorrectionModal(index)}
-                          accessibilityRole="button"
-                          accessibilityLabel={`${page.correctionCount} words to review on this page`}
-                        >
-                          <Feather name="edit-3" size={12} color="#fff" />
-                          <Text
-                            style={[
-                              styles.reviewBadgeText,
-                              { fontFamily: "Inter_600SemiBold" },
-                            ]}
-                          >
-                            {page.correctionCount} to review
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-
-                      {/* Transcription status indicators */}
-                      {page.transcriptionStatus === "pending" ||
-                      page.transcriptionStatus === "processing" ? (
-                        <View style={styles.transcribingWrap}>
-                          <ActivityIndicator
-                            size="small"
-                            color={colors.primary}
-                          />
-                          <Text
-                            style={[
-                              styles.transcribingText,
-                              { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-                            ]}
-                          >
-                            Transcribing…
-                          </Text>
-                        </View>
-                      ) : page.transcriptionStatus === "failed" ? (
-                        <Text
-                          style={[
-                            styles.pageText,
-                            { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-                          ]}
-                        >
-                          Transcription failed. Switch to Original view to see
-                          the photo.
-                        </Text>
-                      ) : (
-                        <Text
-                          style={[
-                            styles.pageText,
-                            { color: "#4a3f35", fontFamily: "PlayfairDisplay_400Regular" },
-                          ]}
-                          accessibilityLabel={`Transcription of page ${index + 1}`}
-                        >
-                          {page.transcriptionText ?? ""}
-                        </Text>
-                      )}
-                    </ScrollView>
-                  )}
-                </View>
-              </View>
-            </View>
-          )}
+          renderItem={renderItem}
         />
       </View>
 
