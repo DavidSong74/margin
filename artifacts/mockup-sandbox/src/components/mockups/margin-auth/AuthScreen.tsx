@@ -134,7 +134,6 @@ export function AuthScreen() {
     await new Promise((r) => setTimeout(r, 1500));
     setSubmitting(false);
     setSuccess(true);
-    console.log("Auth submitted:", { mode, name: name.value, email: email.value });
   };
 
   return (
