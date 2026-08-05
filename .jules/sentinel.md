@@ -1,0 +1,4 @@
+## 2025-02-28 - [Fix DoS vulnerability by catching invalid URL errors in Vite plugin]
+**Vulnerability:** Native Node.js `new URL()` constructors inside HTTP middleware (`artifacts/mockup-sandbox/mockupPreviewPlugin.ts`) parsing user-provided request inputs were not wrapped in a `try...catch` block.
+**Learning:** Supplying a malformed URL payload such as `http://` throws an unhandled `ERR_INVALID_URL` exception that crashes the Node.js process (e.g. Vite dev server or backend), creating a DoS vulnerability.
+**Prevention:** Always wrap `new URL(user_input)` with a `try...catch` block and provide a secure fallback or handle the error gracefully when running inside a Node.js server environment.

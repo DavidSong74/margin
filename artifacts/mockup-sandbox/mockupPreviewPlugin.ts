@@ -156,8 +156,13 @@ export function mockupPreviewPlugin(): Plugin {
       });
 
       viteServer.middlewares.use((req, res, next) => {
-        const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
-        const pathname = requestUrl.pathname;
+        let pathname = "/";
+        try {
+          const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+          pathname = requestUrl.pathname;
+        } catch {
+          // ignore malformed URLs
+        }
         const originalEnd = res.end.bind(res);
 
         res.end = ((...args: Parameters<typeof originalEnd>) => {
