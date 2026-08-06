@@ -156,7 +156,16 @@ export function mockupPreviewPlugin(): Plugin {
       });
 
       viteServer.middlewares.use((req, res, next) => {
-        const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+        let requestUrl;
+        try {
+          // 🛡️ Sentinel: Wrap URL constructor in try-catch to prevent unhandled ERR_INVALID_URL
+          // exceptions from crashing the Node.js process (DoS vulnerability) on malformed requests.
+          requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+        } catch (error) {
+          res.statusCode = 400;
+          res.end("Bad Request: Invalid URL");
+          return;
+        }
         const pathname = requestUrl.pathname;
         const originalEnd = res.end.bind(res);
 
