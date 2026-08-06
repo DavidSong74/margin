@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
+import * as Notifications from "expo-notifications";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Sharing from "expo-sharing";
 import { router } from "expo-router";
@@ -338,9 +339,23 @@ function CoverColorRow({
 
 function StorageRow() {
   const colors = useColors();
-  const used = 2.4;   // STUB — replace with real query once §9 approach is decided
-  const total = 15;   // STUB — replace with real plan limit if you add paid tiers
-  const pct = used / total;
+  const [usedBytes, setUsedBytes] = useState<number | null>(null);
+  const TOTAL_GB = 15;
+
+  useEffect(() => {
+    supabase
+      .rpc("get_user_storage_bytes")
+      .then(({ data }) => {
+        if (data !== null && data !== undefined) {
+          setUsedBytes(data as number);
+        }
+      });
+  }, []);
+
+  const usedGB = usedBytes !== null ? usedBytes / (1024 ** 3) : null;
+  const displayUsed = usedGB !== null ? usedGB.toFixed(2) : "…";
+  const pct = usedGB !== null ? Math.min(usedGB / TOTAL_GB, 1) : 0;
+  const available = usedGB !== null ? (TOTAL_GB - usedGB).toFixed(1) : "…";
 
   return (
     <>
@@ -366,7 +381,7 @@ function StorageRow() {
                 { color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
               ]}
             >
-              {used} GB / {total} GB
+              {displayUsed} GB / {TOTAL_GB} GB
             </Text>
           </View>
           <View
@@ -388,7 +403,7 @@ function StorageRow() {
               { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
             ]}
           >
-            {((total - used)).toFixed(1)} GB available · photos &amp; pages
+            {available} GB available · photos &amp; pages
           </Text>
         </View>
       </View>
@@ -634,6 +649,34 @@ export default function ProfileScreen() {
     );
   }
 
+  // ── Notification helpers ──────────────────────────────────────────────────
+
+  async function requestNotificationPermission(): Promise<boolean> {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    if (existing === "granted") return true;
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === "granted";
+  }
+
+  async function scheduleDaily(
+    identifier: string,
+    hour: number,
+    minute: number,
+    title: string,
+    body: string,
+  ) {
+    await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
+    await Notifications.scheduleNotificationAsync({
+      identifier,
+      content: { title, body, sound: true },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
+        hour,
+        minute,
+      },
+    });
+  }
+
   // ── Sign out ──────────────────────────────────────────────────────────────
 
   function handleSignOut() {
@@ -718,7 +761,23 @@ export default function ProfileScreen() {
             icon="bell"
             label="Daily writing reminder"
             value={dailyReminder}
-            onChange={(v) => { setDailyReminder(v); savePref({ dailyReminder: v }); }}
+            onChange={async (v) => {
+              if (v) {
+                const granted = await requestNotificationPermission();
+                if (!granted) {
+                  Alert.alert("Permission required", "Enable notifications in your device settings.");
+                  return;
+                }
+                await scheduleDaily(
+                  "margin:daily_reminder", 21, 0,
+                  "Time to write ✍️", "Your journal is waiting.",
+                );
+              } else {
+                await Notifications.cancelScheduledNotificationAsync("margin:daily_reminder").catch(() => {});
+              }
+              setDailyReminder(v);
+              savePref({ dailyReminder: v });
+            }}
           />
           {dailyReminder && (
             <>
@@ -735,7 +794,29 @@ export default function ProfileScreen() {
             icon="calendar"
             label={"On this day"}
             value={onThisDay}
-            onChange={(v) => { setOnThisDay(v); savePref({ onThisDay: v }); }}
+            onChange={async (v) => {
+              if (v) {
+                const granted = await requestNotificationPermission();
+                if (!granted) {
+                  Alert.alert("Permission required", "Enable notifications in your device settings.");
+                  return;
+                }
+                await scheduleDaily(
+                  "margin:on_this_day", 10, 0,
+                  "On this day", "You wrote something worth revisiting a year ago.",
+                );
+              } else {
+                await Notifications.cancelScheduledNotificationAsync("margin:on_this_day").catch(() => {});
+              }
+              setOnThisDay(v);
+              savePref({ onThisDay: v });
+              // Sync preference to push_tokens so the server-side digest respects it
+              supabase
+                .from("push_tokens")
+                .update({ on_this_day_enabled: v })
+                .eq("user_id", (await supabase.auth.getUser()).data.user?.id ?? "")
+                .then(() => {});
+            }}
           />
           {onThisDay && (
             <View style={styles.infoRow}>
@@ -753,7 +834,30 @@ export default function ProfileScreen() {
             icon="mail"
             label="Weekly digest"
             value={weeklyDigest}
-            onChange={(v) => { setWeeklyDigest(v); savePref({ weeklyDigest: v }); }}
+            onChange={async (v) => {
+              if (v) {
+                const granted = await requestNotificationPermission();
+                if (!granted) {
+                  Alert.alert("Permission required", "Enable notifications in your device settings.");
+                  return;
+                }
+                await Notifications.cancelScheduledNotificationAsync("margin:weekly_digest").catch(() => {});
+                await Notifications.scheduleNotificationAsync({
+                  identifier: "margin:weekly_digest",
+                  content: { title: "Your week in Margin", body: "See what you wrote this week.", sound: true },
+                  trigger: {
+                    type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+                    weekday: 1,
+                    hour: 10,
+                    minute: 0,
+                  },
+                });
+              } else {
+                await Notifications.cancelScheduledNotificationAsync("margin:weekly_digest").catch(() => {});
+              }
+              setWeeklyDigest(v);
+              savePref({ weeklyDigest: v });
+            }}
             last
           />
         </SectionCard>
@@ -800,7 +904,17 @@ export default function ProfileScreen() {
             value={appLock}
             onChange={handleAppLockChange}
           />
-          <Row icon="eye-off" label="Per-journal privacy" last />
+          <Row
+            icon="eye-off"
+            label="Per-journal privacy"
+            last
+            onPress={() =>
+              Alert.alert(
+                "Per-journal privacy",
+                "Open a journal, tap Edit, then tap the lock icon in the header to lock or unlock that journal. Locked journals require Face ID or Touch ID to open.",
+              )
+            }
+          />
         </SectionCard>
 
         {/* ── Appearance ── */}
@@ -859,26 +973,18 @@ export default function ProfileScreen() {
           <Row
             icon="star"
             label="Rate Margin"
-            onPress={() => {
-              // TODO for you: replace with your App Store link once published
-              Linking.openURL("https://apps.apple.com/app/idTODO");
-            }}
+            onPress={() =>
+              Linking.openURL("https://apps.apple.com/app/idTODO").catch(() =>
+                Alert.alert("Not available yet", "The App Store page will be live after launch.")
+              )
+            }
           />
           <Row
             icon="message-circle"
             label="Send feedback"
-            onPress={() => {
-              // TODO for you: replace with your feedback email or form URL
-              Linking.openURL("mailto:feedback@margin.app?subject=Margin%20Feedback");
-            }}
-          />
-          <Row
-            icon="help-circle"
-            label="Help & FAQ"
-            onPress={() => {
-              // TODO for you: replace with your help center URL
-              Linking.openURL("https://margin.app/help");
-            }}
+            onPress={() =>
+              Linking.openURL("mailto:songdavid93374@gmail.com?subject=Margin%20Feedback")
+            }
           />
           <Row
             icon="info"

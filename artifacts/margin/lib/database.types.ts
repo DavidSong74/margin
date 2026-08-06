@@ -25,6 +25,7 @@ export interface Database {
           cover_style: "solid" | "image";
           cover_color: string | null;
           cover_image_url: string | null;
+          is_private: boolean;
           created_at: string;
         };
         Insert: {
@@ -34,6 +35,7 @@ export interface Database {
           cover_style: "solid" | "image";
           cover_color?: string | null;
           cover_image_url?: string | null;
+          is_private?: boolean;
           created_at?: string;
         };
         Update: {
@@ -43,6 +45,7 @@ export interface Database {
           cover_style?: "solid" | "image";
           cover_color?: string | null;
           cover_image_url?: string | null;
+          is_private?: boolean;
           created_at?: string;
         };
         Relationships: [];
@@ -156,6 +159,33 @@ export interface Database {
         };
         Relationships: [];
       };
+      push_tokens: {
+        Row: {
+          id: string;
+          user_id: string;
+          token: string;
+          on_this_day_enabled: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          token: string;
+          on_this_day_enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          token?: string;
+          on_this_day_enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -188,6 +218,21 @@ export interface Database {
           transcription_text: string;
           created_at: string;
         }>;
+      };
+      get_user_storage_bytes: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      journal_pending_counts: {
+        Args: { p_journal_ids: string[] };
+        Returns: Array<{
+          journal_id: string;
+          pending_count: number;
+        }>;
+      };
+      reorder_pages: {
+        Args: { p_journal_id: string; p_page_ids: string[] };
+        Returns: undefined;
       };
     };
     Enums: Record<string, never>;

@@ -1,1171 +1,674 @@
-# Margin — Claude TODO
-
-All items below are persistence stubs from the settings/profile tab: they save a value to AsyncStorage
-but nothing reads that value to change actual app behavior. Implement in order — the theme system
-(#1) should be done first since it touches shared infrastructure.
-
-Search for `TODO for you` to find every decision that needs your taste or a real URL/value.
+# Margin — Remaining Features
 
 ---
 
-## 1. Theme system (light / dark / system)
+## IMMEDIATE — needs manual action
 
-**What it does:** Wires the theme toggle in profile.tsx so choosing Light, Dark, or System actually
-changes the app's colors.
+### Run the search migration in Supabase
 
-**The gap:** `useColors()` calls React Native's `useColorScheme()` directly — it always returns
-the device OS setting regardless of what's saved in AsyncStorage. Also, `constants/colors.ts` has no
-`dark` palette, so dark mode would show the light palette even if the OS is dark.
+`supabase/migrations/003_search.sql` has been written but not applied. Search returns nothing
+until you run it.
 
-**Files to modify:**
-- `artifacts/margin/constants/colors.ts`
-- `artifacts/margin/hooks/useColors.ts`
-- `artifacts/margin/hooks/useTheme.ts` (new file)
-- `artifacts/margin/app/_layout.tsx`
-- `artifacts/margin/app/(tabs)/profile.tsx`
+**Go to:** Supabase Dashboard → SQL Editor → New query → paste `003_search.sql` → Run.
+
+Also run `supabase functions deploy transcribe` to push the rate-limiting change live.
 
 ---
 
-### Step 1 — Define the dark palette in constants/colors.ts
+## 1. EAS Build config (required before any TestFlight / App Store submission)
 
-> **TODO for you:** Fill in all 18 hex values below. Current light values are shown as comments
-> so you can decide the dark equivalents. The two palettes must have the same keys.
+**Problem:** There is no `eas.json`, no bundle identifier set, icons are missing at required sizes,
+and the notification icon PNG referenced in `app.json` doesn't exist on disk yet. None of this
+prevents development builds from running, but `eas build` will fail without it.
 
-Find:
-```ts
-  radius: 12,
-};
-```
-Change to:
-```ts
-  dark: {
-    text: "#TODO",               // light: "#4a3f35"
-    tint: "#TODO",               // light: "#7d9b76"
+**Files to create/modify:**
+- `artifacts/margin/eas.json` (new)
+- `artifacts/margin/app.json`
+- `artifacts/margin/assets/images/notification-icon.png` (new, design asset)
 
-    background: "#TODO",         // light: "#faf7f2"
-    foreground: "#TODO",         // light: "#4a3f35"
+---
 
-    card: "#TODO",               // light: "#fffdf9"
-    cardForeground: "#TODO",     // light: "#4a3f35"
+### Step 1 — Create eas.json
 
-    primary: "#TODO",            // light: "#7d9b76"
-    primaryForeground: "#TODO",  // light: "#ffffff"
+Create `artifacts/margin/eas.json`:
 
-    secondary: "#TODO",          // light: "#f0ece4"
-    secondaryForeground: "#TODO",// light: "#4a3f35"
-
-    muted: "#TODO",              // light: "#f0ece4"
-    mutedForeground: "#TODO",    // light: "#8c7d72"
-
-    accent: "#TODO",             // light: "#7d9b76"
-    accentForeground: "#TODO",   // light: "#ffffff"
-
-    destructive: "#TODO",        // light: "#b05c4a"
-    destructiveForeground: "#TODO", // light: "#ffffff"
-
-    border: "#TODO",             // light: "#e8e0d4"
-    input: "#TODO",              // light: "#e8e0d4"
+```json
+{
+  "cli": {
+    "version": ">= 14.0.0"
   },
-
-  radius: 12,
-};
-```
-
----
-
-### Step 2 — Create hooks/useTheme.ts (new file)
-
-Create `artifacts/margin/hooks/useTheme.ts` with this content:
-
-```ts
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-
-export type ThemeOption = "light" | "dark" | "system";
-
-interface ThemeContextValue {
-  theme: ThemeOption;
-  setTheme: (t: ThemeOption) => void;
-}
-
-const ThemeContext = createContext<ThemeContextValue>({
-  theme: "system",
-  setTheme: () => {},
-});
-
-const PREFS_KEY = "margin:settings";
-
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeOption>("system");
-
-  useEffect(() => {
-    AsyncStorage.getItem(PREFS_KEY).then((raw) => {
-      if (!raw) return;
-      const stored = JSON.parse(raw);
-      if (stored.theme) setThemeState(stored.theme);
-    });
-  }, []);
-
-  const setTheme = useCallback((t: ThemeOption) => {
-    setThemeState(t);
-    AsyncStorage.getItem(PREFS_KEY).then((raw) => {
-      const current = raw ? JSON.parse(raw) : {};
-      AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, theme: t }));
-    });
-  }, []);
-
-  return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
-}
-
-export function useTheme() {
-  return useContext(ThemeContext);
-}
-```
-
----
-
-### Step 3 — Update hooks/useColors.ts
-
-Replace the entire file contents with:
-
-```ts
-import { useColorScheme } from "react-native";
-import colors from "@/constants/colors";
-import { useTheme } from "@/hooks/useTheme";
-
-export function useColors() {
-  const { theme } = useTheme();
-  const systemScheme = useColorScheme();
-
-  const resolved = theme === "system" ? systemScheme : theme;
-  const palette = resolved === "dark" && colors.dark ? colors.dark : colors.light;
-  return { ...palette, radius: colors.radius };
-}
-```
-
----
-
-### Step 4 — Wrap the app in ThemeProvider (app/_layout.tsx)
-
-Add import:
-```tsx
-import { ThemeProvider } from "@/hooks/useTheme";
-```
-
-Find the outermost JSX element in the root layout return and wrap it:
-```tsx
-return (
-  <ThemeProvider>
-    {/* existing root element unchanged */}
-  </ThemeProvider>
-);
-```
-
----
-
-### Step 5 — Wire profile.tsx ThemeRow to the context
-
-In `profile.tsx`, add the import:
-```tsx
-import { useTheme, type ThemeOption } from "@/hooks/useTheme";
-```
-
-Inside `ProfileScreen`, find:
-```tsx
-const [theme, setTheme] = useState<ThemeOption>(DEFAULT_PREFS.theme);
-```
-Replace with:
-```tsx
-const { theme, setTheme: setThemeGlobal } = useTheme();
-```
-
-Remove `theme` from the `Prefs` type, `DEFAULT_PREFS`, and the `savePref` current object, since
-persistence is now handled by `ThemeProvider`.
-
-Find the ThemeRow usage:
-```tsx
-<ThemeRow value={theme} onChange={(v) => { setTheme(v); savePref({ theme: v }); }} />
-```
-Change to:
-```tsx
-<ThemeRow value={theme} onChange={(v) => setThemeGlobal(v)} />
-```
-
-Also remove the standalone `type ThemeOption = "light" | "dark" | "system"` declaration near the
-top of profile.tsx (it's now imported from useTheme).
-
----
-
-## 2. Default cover color for new journals
-
-**What it does:** Pre-selects the user's preferred cover color on the new journal screen so they
-don't have to pick it every time.
-
-**The gap:** `coverColor` is saved to AsyncStorage, but `app/journal/new.tsx` always initializes
-`selectedColor` to `COVER_COLORS[0].hex` (line 48) and never reads the saved pref.
-
-**File to modify:** `artifacts/margin/app/journal/new.tsx`
-
----
-
-### Step 1 — Add AsyncStorage import
-
-At the top of `new.tsx`, add:
-```tsx
-import AsyncStorage from "@react-native-async-storage/async-storage";
-```
-Also add `useEffect` to the React import if it's not already there.
-
----
-
-### Step 2 — Read pref on mount
-
-After the `selectedColor` useState declaration (line 48), add:
-
-```tsx
-useEffect(() => {
-  AsyncStorage.getItem("margin:settings").then((raw) => {
-    if (!raw) return;
-    const prefs = JSON.parse(raw);
-    if (prefs.coverColor && !coverIsPhoto) {
-      setSelectedColor(prefs.coverColor);
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      }
+    },
+    "production": {
+      "autoIncrement": true
     }
-  });
-}, []);
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "YOUR_APPLE_ID_EMAIL",
+        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID",
+        "appleTeamId": "YOUR_APPLE_TEAM_ID"
+      }
+    }
+  }
+}
 ```
 
-Reason: Only apply the saved default when the user hasn't already chosen a photo cover. Runs once
-on mount before the user interacts with the picker.
+---
+
+### Step 2 — Set bundle identifiers in app.json
+
+In `app.json`, add `bundleIdentifier` under `ios` and `package` under `android`:
+
+```json
+"ios": {
+  "supportsTablet": false,
+  "bundleIdentifier": "com.yourname.margin",
+  "infoPlist": { ... }
+},
+"android": {
+  "package": "com.yourname.margin",
+  "permissions": [ ... ]
+}
+```
+
+Pick a reverse-DNS ID you own. Once submitted to Apple, this cannot be changed.
 
 ---
 
-## 3. Notifications — daily reminder, on this day, weekly digest
+### Step 3 — Create the notification icon
 
-**What it does:** Wires the three notification toggles to actually schedule and cancel local push
-notifications.
-
-**The gap:** All three toggles write to AsyncStorage but never call expo-notifications.
-`expo-notifications` is NOT currently installed.
+Create `artifacts/margin/assets/images/notification-icon.png`:
+- 96×96 px
+- White icon on **transparent** background
+- Android uses this as the small notification icon — it must be monochrome white
+- iOS ignores this file and uses the app icon automatically
+- A simplified version of the existing app icon works fine
 
 ---
 
-### Step 1 — Install the package
+### Step 4 — Verify app icon
+
+`assets/images/icon.png` must be exactly **1024×1024 px**. EAS Build will reject it otherwise.
+Check with: `sips -g pixelWidth -g pixelHeight assets/images/icon.png`
+
+---
+
+### Step 5 — Build and submit
 
 ```bash
 cd artifacts/margin
-npx expo install expo-notifications
+eas build --platform ios --profile production
+eas submit --platform ios
 ```
-
-Then in `app.json`, add to the `expo.plugins` array:
-```json
-["expo-notifications", {
-  "icon": "./assets/images/notification-icon.png",
-  "color": "#7d9b76"
-}]
-```
-
-> **TODO for you:** Create `assets/images/notification-icon.png` — a 96×96px image with a
-> white icon on a transparent background (Android requirement). Use a simplified version of your
-> app icon. The `color` above matches the current primary; update if your primary changes.
 
 ---
 
-### Step 2 — Add import to profile.tsx
+## 2. Storage used — real data
+
+**Problem:** `StorageRow` in `profile.tsx` shows hardcoded `used = 2.4` and `total = 15`.
+The user has no idea how much space their journals actually take.
+
+**Why it's hard:** The Supabase client SDK has no built-in way to sum storage object sizes from
+the client. `supabase.storage.from("journal_pages").list()` returns file metadata per folder,
+not a flat aggregate. The only way to get a total is via the `storage.objects` system table,
+which requires either the service role or a DB trigger.
+
+**Recommended approach — DB trigger maintaining a running total:**
+
+Run in Supabase SQL Editor:
+
+```sql
+-- Add storage tracking to a user stats table (create if needed)
+CREATE TABLE IF NOT EXISTS user_stats (
+  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  storage_bytes bigint NOT NULL DEFAULT 0
+);
+
+ALTER TABLE user_stats ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "user_stats: select own" ON user_stats
+  FOR SELECT USING (auth.uid() = user_id);
+
+-- Trigger function: fires on every storage.objects INSERT or DELETE
+CREATE OR REPLACE FUNCTION update_user_storage()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  uid uuid;
+  delta bigint;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    uid := (NEW.owner)::uuid;
+    delta := (NEW.metadata->>'size')::bigint;
+  ELSE
+    uid := (OLD.owner)::uuid;
+    delta := -((OLD.metadata->>'size')::bigint);
+  END IF;
+
+  INSERT INTO user_stats (user_id, storage_bytes)
+    VALUES (uid, GREATEST(0, delta))
+  ON CONFLICT (user_id) DO UPDATE
+    SET storage_bytes = GREATEST(0, user_stats.storage_bytes + delta);
+
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_storage_bytes
+AFTER INSERT OR DELETE ON storage.objects
+FOR EACH ROW EXECUTE FUNCTION update_user_storage();
+```
+
+**In profile.tsx, update StorageRow:**
+
+```tsx
+function StorageRow() {
+  const colors = useColors();
+  const [usedBytes, setUsedBytes] = useState<number | null>(null);
+  const PLAN_GB = 15;
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return;
+      supabase
+        .from("user_stats")
+        .select("storage_bytes")
+        .eq("user_id", session.user.id)
+        .single()
+        .then(({ data }) => {
+          setUsedBytes(data?.storage_bytes ?? 0);
+        });
+    });
+  }, []);
+
+  const usedGB = usedBytes !== null ? usedBytes / 1024 / 1024 / 1024 : null;
+  const pct = usedGB !== null ? Math.min(usedGB / PLAN_GB, 1) : 0;
+  const label = usedGB !== null ? `${usedGB.toFixed(2)} GB` : "…";
+  // ... rest of existing JSX, replace used/total with usedGB/PLAN_GB
+}
+```
+
+**Watch out for:** The trigger runs on `storage.objects` which is a system table. Supabase allows
+triggers on it but the `owner` column is a string UUID, not typed — hence the `(NEW.owner)::uuid`
+cast. Test with a real upload before relying on the numbers.
+
+---
+
+## 3. "On this day" — personalized notification
+
+**Problem:** The current implementation schedules a generic daily local notification at 10:00 AM.
+It will always say "You wrote something worth revisiting a year ago" whether or not you actually
+wrote anything that day. A user with no entries from a year ago still gets the notification.
+
+**What it needs to be:** A server-side job that runs once a day, checks each user's pages for
+entries written exactly 365 days ago, and sends a personalized push notification containing the
+actual first sentence of that page's transcription. Users with no matching entries get nothing.
+
+**Implementation has three parts:**
+
+---
+
+### Part A — Store Expo push tokens
+
+In `app/_layout.tsx`, after the session is established, register for push notifications and
+store the token in a new `push_tokens` table:
+
+```sql
+-- Run in Supabase SQL Editor
+CREATE TABLE IF NOT EXISTS push_tokens (
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  token   text NOT NULL,
+  platform text NOT NULL, -- 'ios' | 'android'
+  updated_at timestamptz DEFAULT now(),
+  PRIMARY KEY (user_id, token)
+);
+ALTER TABLE push_tokens ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "push_tokens: insert own"
+  ON push_tokens FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "push_tokens: update own"
+  ON push_tokens FOR UPDATE USING (auth.uid() = user_id);
+```
+
+In `_layout.tsx`, inside `RootLayout`, after `session` is set:
 
 ```tsx
 import * as Notifications from "expo-notifications";
-```
-
----
-
-### Step 3 — Add requestNotificationPermission helper
-
-Inside `ProfileScreen`, before the return statement, add:
-
-```tsx
-async function requestNotificationPermission(): Promise<boolean> {
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  if (existing === "granted") return true;
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === "granted";
-}
-```
-
----
-
-### Step 4 — Add scheduleDaily helper
-
-```tsx
-async function scheduleDaily(
-  identifier: string,
-  hour: number,
-  minute: number,
-  title: string,
-  body: string,
-) {
-  await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
-  await Notifications.scheduleNotificationAsync({
-    identifier,
-    content: { title, body, sound: true },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour,
-      minute,
-    },
-  });
-}
-```
-
----
-
-### Step 5 — Wire the dailyReminder toggle
-
-Find:
-```tsx
-onChange={(v) => { setDailyReminder(v); savePref({ dailyReminder: v }); }}
-```
-Change to:
-```tsx
-onChange={async (v) => {
-  if (v) {
-    const granted = await requestNotificationPermission();
-    if (!granted) {
-      Alert.alert(
-        "Permission required",
-        "Enable notifications in your device settings to use reminders.",
-      );
-      return;
-    }
-    await scheduleDaily(
-      "margin:daily_reminder",
-      21, 0,                          // TODO for you: preferred default hour/minute (24h)
-      "TODO: daily reminder title",   // TODO for you: e.g. "Time to write ✍️"
-      "TODO: daily reminder body",    // TODO for you: e.g. "Your journal is waiting."
-    );
-  } else {
-    await Notifications.cancelScheduledNotificationAsync("margin:daily_reminder").catch(() => {});
-  }
-  setDailyReminder(v);
-  savePref({ dailyReminder: v });
-}}
-```
-
----
-
-### Step 6 — Wire the onThisDay toggle
-
-Find:
-```tsx
-onChange={(v) => { setOnThisDay(v); savePref({ onThisDay: v }); }}
-```
-Change to:
-```tsx
-onChange={async (v) => {
-  if (v) {
-    const granted = await requestNotificationPermission();
-    if (!granted) return;
-    await scheduleDaily(
-      "margin:on_this_day",
-      10, 0,
-      "TODO: on this day title",  // TODO for you: e.g. "On this day"
-      "TODO: on this day body",   // TODO for you: e.g. "You wrote something worth revisiting."
-    );
-  } else {
-    await Notifications.cancelScheduledNotificationAsync("margin:on_this_day").catch(() => {});
-  }
-  setOnThisDay(v);
-  savePref({ onThisDay: v });
-}}
-```
-
-> **TODO for you:** This local notification fires daily with a generic message. A real "on this day"
-> implementation needs a server-side scheduled job — a Supabase `pg_cron` rule or an Edge Function
-> called on a schedule — that queries `pages` WHERE `created_at::date = (now() - interval '1 year')::date`
-> for the user, then sends a personalized push via the Expo Push Notification API with the actual
-> entry excerpt. The local notification above is a useful placeholder in the meantime.
-
----
-
-### Step 7 — Wire the weeklyDigest toggle
-
-Find:
-```tsx
-onChange={(v) => { setWeeklyDigest(v); savePref({ weeklyDigest: v }); }}
-```
-Change to:
-```tsx
-onChange={async (v) => {
-  if (v) {
-    const granted = await requestNotificationPermission();
-    if (!granted) return;
-    await Notifications.cancelScheduledNotificationAsync("margin:weekly_digest").catch(() => {});
-    await Notifications.scheduleNotificationAsync({
-      identifier: "margin:weekly_digest",
-      content: {
-        title: "TODO: digest title",  // TODO for you: e.g. "Your week in Margin"
-        body: "TODO: digest body",    // TODO for you: e.g. "See what you wrote this week."
-        sound: true,
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-        weekday: 1,  // TODO for you: 1=Sunday, 2=Monday … 7=Saturday
-        hour: 10,
-        minute: 0,
-      },
-    });
-  } else {
-    await Notifications.cancelScheduledNotificationAsync("margin:weekly_digest").catch(() => {});
-  }
-  setWeeklyDigest(v);
-  savePref({ weeklyDigest: v });
-}}
-```
-
----
-
-## 4. App lock (Face ID / Touch ID)
-
-**What it does:** When enabled, requires biometric auth each time the app comes to the foreground.
-
-**The gap:** The toggle saves `appLock` to AsyncStorage but biometric authentication is never
-triggered. `expo-local-authentication` is NOT installed.
-
----
-
-### Step 1 — Install the package
-
-```bash
-cd artifacts/margin
-npx expo install expo-local-authentication
-```
-
----
-
-### Step 2 — Wire the toggle in profile.tsx
-
-Add import:
-```tsx
-import * as LocalAuthentication from "expo-local-authentication";
-```
-
-Find the appLock ToggleRow onChange:
-```tsx
-onChange={(v) => { setAppLock(v); savePref({ appLock: v }); }}
-```
-Change to:
-```tsx
-onChange={async (v) => {
-  if (v) {
-    const hasHardware = await LocalAuthentication.hasHardwareAsync();
-    const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-    if (!hasHardware || !isEnrolled) {
-      Alert.alert("Not available", "No biometrics are enrolled on this device.");
-      return;
-    }
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: "Enable app lock",
-      fallbackLabel: "Use passcode",
-    });
-    if (!result.success) return;
-  }
-  setAppLock(v);
-  savePref({ appLock: v });
-}}
-```
-
-Reason: Require a successful auth before enabling the lock — prevents accidentally locking yourself
-out on a device where biometrics stop working.
-
----
-
-### Step 3 — Add foreground lock gate in _layout.tsx
-
-Add imports to `app/_layout.tsx`:
-```tsx
-import * as LocalAuthentication from "expo-local-authentication";
-import { AppState, AppStateStatus } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useColors } from "@/hooks/useColors";
-```
-
-Inside the root layout component, add state and effect:
-```tsx
-const colors = useColors();
-const [locked, setLocked] = useState(false);
+import Constants from "expo-constants";
 
 useEffect(() => {
-  async function checkLock(nextState: AppStateStatus) {
-    if (nextState !== "active") return;
-    const raw = await AsyncStorage.getItem("margin:settings");
-    if (!raw) return;
-    const prefs = JSON.parse(raw);
-    if (!prefs.appLock) return;
-    setLocked(true);
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: "Unlock Margin",
-      disableDeviceFallback: false,
+  if (!session) return;
+  (async () => {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== "granted") return;
+    const token = await Notifications.getExpoPushTokenAsync({
+      projectId: Constants.expoConfig?.extra?.eas?.projectId,
     });
-    if (result.success) setLocked(false);
+    await supabase.from("push_tokens").upsert({
+      user_id: session.user.id,
+      token: token.data,
+      platform: Platform.OS,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id,token" });
+  })();
+}, [session]);
+```
+
+You get the `projectId` from `eas.json` after running `eas build` once — it gets written to
+`app.json` under `extra.eas.projectId` automatically.
+
+---
+
+### Part B — Create a daily Edge Function
+
+Create `supabase/functions/daily-digest/index.ts`:
+
+```ts
+// Called by a pg_cron job daily at 09:50 UTC (fires before 10:00 local notifications)
+// Requires: SUPABASE_SERVICE_ROLE_KEY and EXPO_ACCESS_TOKEN in Supabase secrets
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+Deno.serve(async (req) => {
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const expoToken = Deno.env.get("EXPO_ACCESS_TOKEN")!;
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  // Find pages written between 364 and 366 days ago (±1 day buffer for timezones)
+  const from = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000).toISOString();
+  const to   = new Date(Date.now() - 364 * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: pages } = await admin
+    .from("pages")
+    .select("journal_id, transcription_text, journals!inner(user_id, title)")
+    .gte("created_at", from)
+    .lte("created_at", to)
+    .not("transcription_text", "is", null)
+    .is("deleted_at", null);
+
+  if (!pages?.length) return new Response("no matches", { status: 200 });
+
+  // Group by user — pick one page per user
+  const byUser = new Map<string, { text: string; journalTitle: string }>();
+  for (const p of pages) {
+    const uid = (p.journals as { user_id: string; title: string }).user_id;
+    if (!byUser.has(uid)) {
+      byUser.set(uid, {
+        text: p.transcription_text!.slice(0, 120),
+        journalTitle: (p.journals as { title: string }).title,
+      });
+    }
   }
 
-  const sub = AppState.addEventListener("change", checkLock);
-  checkLock("active"); // run on initial mount too
-  return () => sub.remove();
-}, []);
-```
+  // Fetch their push tokens
+  const userIds = Array.from(byUser.keys());
+  const { data: tokens } = await admin
+    .from("push_tokens")
+    .select("user_id, token")
+    .in("user_id", userIds);
 
-In the return, add a guard before the navigation tree:
-```tsx
-if (locked) {
-  return <View style={{ flex: 1, backgroundColor: colors.background }} />;
-}
-```
+  if (!tokens?.length) return new Response("no tokens", { status: 200 });
 
-Import `useState`, `useEffect`, and `View` if not already imported there.
+  // Send via Expo Push API
+  const messages = tokens.map(({ user_id, token }) => {
+    const entry = byUser.get(user_id)!;
+    return {
+      to: token,
+      title: "On this day",
+      body: entry.text + (entry.text.length >= 120 ? "…" : ""),
+      data: {},
+    };
+  });
 
-> **TODO for you:** The locked state renders a blank view. The biometric prompt fires on mount so
-> the blank flash is brief — but you may want to show an app logo or a "Tap to unlock" label.
+  await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${expoToken}`,
+    },
+    body: JSON.stringify(messages),
+  });
 
----
-
-## 5. Change password
-
-**What it does:** Taps "Change password" → modal to set a new password via `supabase.auth.updateUser`.
-
-**The gap:** The row has no `onPress`.
-
-**File to modify:** `artifacts/margin/app/(tabs)/profile.tsx`
-
----
-
-### Step 1 — Add Modal, TextInput, ActivityIndicator to RN imports
-
-```tsx
-import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
-```
-
----
-
-### Step 2 — Add modal state
-
-Inside `ProfileScreen`, after existing state declarations:
-```tsx
-const [showPasswordModal, setShowPasswordModal] = useState(false);
-const [newPassword, setNewPassword] = useState("");
-const [passwordLoading, setPasswordLoading] = useState(false);
-```
-
----
-
-### Step 3 — Add change password handler
-
-```tsx
-async function handleChangePassword() {
-  if (newPassword.length < 8) {
-    Alert.alert("Too short", "Password must be at least 8 characters.");
-    return;
-  }
-  setPasswordLoading(true);
-  const { error } = await supabase.auth.updateUser({ password: newPassword });
-  setPasswordLoading(false);
-  if (error) {
-    Alert.alert("Error", error.message);
-  } else {
-    Alert.alert("Done", "Your password has been updated.");
-    setNewPassword("");
-    setShowPasswordModal(false);
-  }
-}
-```
-
----
-
-### Step 4 — Wire the row
-
-Find:
-```tsx
-<Row icon="lock" label="Change password" />
-```
-Change to:
-```tsx
-<Row icon="lock" label="Change password" onPress={() => setShowPasswordModal(true)} />
-```
-
----
-
-### Step 5 — Add modal JSX
-
-After the closing `</ScrollView>` tag, add:
-
-```tsx
-<Modal
-  visible={showPasswordModal}
-  transparent
-  animationType="fade"
-  onRequestClose={() => setShowPasswordModal(false)}
->
-  <View style={styles.modalOverlay}>
-    <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <Text style={[styles.modalTitle, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
-        Change password
-      </Text>
-      <TextInput
-        value={newPassword}
-        onChangeText={setNewPassword}
-        placeholder="New password (min 8 characters)"
-        secureTextEntry
-        autoFocus
-        placeholderTextColor={colors.mutedForeground}
-        style={[
-          styles.modalInput,
-          { color: colors.foreground, borderColor: colors.border, fontFamily: "Inter_400Regular" },
-        ]}
-      />
-      <View style={styles.modalButtons}>
-        <TouchableOpacity
-          onPress={() => { setShowPasswordModal(false); setNewPassword(""); }}
-          style={styles.modalCancelBtn}
-        >
-          <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_400Regular" }}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={handleChangePassword}
-          disabled={passwordLoading}
-          style={[styles.modalConfirmBtn, { backgroundColor: colors.primary }]}
-        >
-          {passwordLoading
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Text style={{ color: "#fff", fontFamily: "Inter_600SemiBold" }}>Update</Text>}
-        </TouchableOpacity>
-      </View>
-    </View>
-  </View>
-</Modal>
-```
-
----
-
-### Step 6 — Add StyleSheet entries
-
-Add to `StyleSheet.create({...})`:
-```tsx
-modalOverlay: {
-  flex: 1,
-  backgroundColor: "rgba(0,0,0,0.4)",
-  justifyContent: "center",
-  alignItems: "center",
-  padding: 24,
-},
-modalCard: {
-  width: "100%",
-  borderRadius: 16,
-  borderWidth: 1,
-  padding: 20,
-  gap: 16,
-},
-modalTitle: { fontSize: 17 },
-modalInput: {
-  borderWidth: 1,
-  borderRadius: 10,
-  paddingHorizontal: 14,
-  paddingVertical: 12,
-  fontSize: 15,
-},
-modalButtons: {
-  flexDirection: "row",
-  justifyContent: "flex-end",
-  gap: 12,
-},
-modalCancelBtn: { paddingVertical: 10, paddingHorizontal: 16 },
-modalConfirmBtn: {
-  paddingVertical: 10,
-  paddingHorizontal: 20,
-  borderRadius: 10,
-  alignItems: "center",
-  minWidth: 80,
-},
-```
-
----
-
-## 6. AI transcription quality
-
-**What it does:** Passes a quality level from the user's settings to the Edge Function so Gemini
-adjusts its approach for speed vs. accuracy.
-
-**The gap:** The profile row shows hardcoded "Balanced". The Edge Function ignores any quality param.
-
-**Files to modify:**
-- `artifacts/margin/app/(tabs)/profile.tsx`
-- `artifacts/margin/app/capture.tsx`
-- `supabase/functions/transcribe/index.ts`
-
----
-
-### Step 1 — Add transcriptionQuality to Prefs type in profile.tsx
-
-Find:
-```tsx
-type Prefs = {
-  dailyReminder: boolean;
-```
-Change to:
-```tsx
-type TranscriptionQuality = "standard" | "balanced" | "best";
-
-type Prefs = {
-  dailyReminder: boolean;
-```
-
-Add the field to the end of `Prefs` (before closing `}`):
-```tsx
-  transcriptionQuality: TranscriptionQuality;
-```
-
-Add to `DEFAULT_PREFS`:
-```tsx
-  transcriptionQuality: "balanced",
-```
-
-Add to the useState block:
-```tsx
-const [transcriptionQuality, setTranscriptionQuality] = useState<TranscriptionQuality>(DEFAULT_PREFS.transcriptionQuality);
-```
-
-Add to the AsyncStorage load useEffect, inside the `if (raw)` block:
-```tsx
-if (stored.transcriptionQuality !== undefined) setTranscriptionQuality(stored.transcriptionQuality);
-```
-
-Add `transcriptionQuality` to the `current` object in `savePref`:
-```tsx
-const current: Prefs = {
-  dailyReminder, onThisDay, weeklyDigest,
-  iCloudBackup, driveBackup, appLock, theme, coverColor,
-  transcriptionQuality,
-};
-```
-
----
-
-### Step 2 — Replace the hardcoded quality Row
-
-Find:
-```tsx
-<Row
-  icon="cpu"
-  label="AI transcription quality"
-  value="Balanced"
-  last
-/>
-```
-Change to:
-```tsx
-<Row
-  icon="cpu"
-  label="AI transcription quality"
-  value={transcriptionQuality.charAt(0).toUpperCase() + transcriptionQuality.slice(1)}
-  last
-  onPress={() => {
-    const options: { key: TranscriptionQuality; label: string }[] = [
-      { key: "standard", label: "Standard — faster, skips uncertain words" },
-      { key: "balanced", label: "Balanced — default" },
-      { key: "best",     label: "Best — slower, highest accuracy" },
-    ];
-    Alert.alert(
-      "Transcription quality",
-      "Affects how carefully Gemini reads your handwriting.",
-      [
-        ...options.map((o) => ({
-          text: o.label + (o.key === transcriptionQuality ? " ✓" : ""),
-          onPress: () => {
-            setTranscriptionQuality(o.key);
-            savePref({ transcriptionQuality: o.key });
-          },
-        })),
-        { text: "Cancel", style: "cancel" as const },
-      ],
-    );
-  }}
-/>
-```
-
----
-
-### Step 3 — Pass quality in capture.tsx when invoking transcribe
-
-Find the `supabase.functions.invoke("transcribe", ...)` call. Change:
-```tsx
-supabase.functions
-  .invoke("transcribe", { body: { page_id: pageId, image_path: imagePath } })
-  .catch((err) => console.warn("[transcribe] invoke failed:", err));
-```
-To:
-```tsx
-AsyncStorage.getItem("margin:settings").then((raw) => {
-  const quality = raw ? (JSON.parse(raw).transcriptionQuality ?? "balanced") : "balanced";
-  supabase.functions
-    .invoke("transcribe", { body: { page_id: pageId, image_path: imagePath, quality } })
-    .catch((err) => console.warn("[transcribe] invoke failed:", err));
+  return new Response(`sent ${messages.length}`, { status: 200 });
 });
 ```
 
-Add to capture.tsx imports if not already present:
+Deploy: `supabase functions deploy daily-digest`
+
+---
+
+### Part C — Schedule it with pg_cron
+
+Run in Supabase SQL Editor:
+
+```sql
+SELECT cron.schedule(
+  'daily-on-this-day',
+  '50 9 * * *',   -- 09:50 UTC daily
+  $$
+  SELECT net.http_post(
+    url := current_setting('app.supabase_url') || '/functions/v1/daily-digest',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || current_setting('app.service_role_key')
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);
+```
+
+You'll need to set `app.supabase_url` and `app.service_role_key` as Postgres config parameters,
+or hardcode the URL (less clean). pg_cron is available on Supabase Pro plan.
+
+**Alternative to pg_cron:** Use a GitHub Actions cron workflow or an external cron service
+(cron-job.org, Render cron jobs) to hit the Edge Function URL with a service-role Bearer token.
+This works on any Supabase plan.
+
+**Watch out for:** The ±1 day buffer for timezones means some users get the notification a day
+early or late. A proper fix stores each user's timezone offset in their profile. For v1, the
+buffer is acceptable.
+
+---
+
+## 4. iCloud backup
+
+**Problem:** The `iCloudBackup` toggle saves to AsyncStorage but never touches iCloud.
+
+**Reality check:** True iCloud sync (like Apple Notes) requires the `com.apple.developer.ubiquity-container-identifiers` entitlement and native CloudKit APIs — neither of which Expo exposes out of the box. This is a significant native integration.
+
+**Practical v1 approach — "Save to iCloud Drive":**
+
+Instead of automatic background sync, make the toggle trigger the same text export that
+`handleExport` already does, but save to `FileSystem.documentDirectory` (which on iOS maps to
+the app's Documents folder, which iCloud Drive can sync if the user has enabled "iCloud Drive →
+Margin" in Settings).
+
+This approach:
+- Requires no new native modules
+- Works within App Store rules
+- The user manually enables iCloud sync for the app in iOS Settings
+
+Update the `iCloudBackup` onChange in `profile.tsx`:
+
 ```tsx
-import AsyncStorage from "@react-native-async-storage/async-storage";
+onChange={async (v) => {
+  if (v) {
+    Alert.alert(
+      "iCloud backup",
+      "Margin will save a text export to your Documents folder. Enable iCloud Drive → Margin in iOS Settings to sync it to iCloud.",
+      [{ text: "OK" }]
+    );
+    // Trigger an initial export to Documents
+    await handleExport(); // already implemented
+  }
+  setICloudBackup(v);
+  savePref({ iCloudBackup: v });
+}}
 ```
+
+**Watch out for:** This is not true real-time sync — it's a manual export to a folder that iCloud
+Drive may pick up. If you want true automatic background sync, you'd need to use a third-party
+library like `react-native-cloud-store` (wraps iCloud APIs natively) and add it as a bare
+workflow plugin with a custom `app.plugin.js`. That's a significant scope increase.
 
 ---
 
-### Step 4 — Read quality in the Edge Function (transcribe/index.ts)
+## 5. Google Drive backup
 
-In the body-parse block (Step 2), after `page_id = body.page_id`, add:
-```ts
-const quality: "standard" | "balanced" | "best" = body.quality ?? "balanced";
-```
+**Problem:** The `driveBackup` toggle saves to AsyncStorage and does nothing.
 
-Then find the `systemInstructions` array (Step 7) and add quality guidance:
-```ts
-const qualityInstruction =
-  quality === "standard"
-    ? "TODO: standard instruction"   // TODO for you: e.g. "Prioritize speed. Only transcribe clearly legible words."
-    : quality === "best"
-    ? "TODO: best instruction"       // TODO for you: e.g. "Prioritize accuracy above all. Re-read every word using surrounding context."
-    : "";
+**What it actually requires:**
+1. A Google Cloud project with Drive API enabled
+2. OAuth 2.0 client ID (iOS type) configured in Google Cloud Console
+3. `expo-auth-session` for the OAuth flow
+4. Refresh token storage (so users don't have to re-auth every session)
+5. Drive API calls to upload the export file
 
-const systemInstructions = [
-  "You are an expert at transcribing handwritten text from journal pages.",
-  "Transcribe all visible handwritten text exactly as written, preserving line breaks.",
-  "Return ONLY the transcribed text — no commentary, no formatting, no markdown.",
-  qualityInstruction,
-  glossaryHint,
-]
-  .filter(Boolean)
-  .join("\n\n");
-```
+This is the most complex item on this list. It's a full OAuth integration with token management.
 
-> **TODO for you:** Write the actual instruction strings for "standard" and "best". Also decide
-> whether "best" should switch to a more powerful model — if so, replace `GEMINI_MODEL` at the top
-> of the file with a conditional:
-> ```ts
-> const GEMINI_MODEL = quality === "best" ? "gemini-2.5-pro" : "gemini-2.5-flash";
-> ```
-
----
-
-## 7. Export full archive
-
-**What it does:** Taps "Export full archive" → downloads all journal images and transcription text,
-then opens the share sheet.
-
-**The gap:** The row has no `onPress`. `expo-sharing` is not installed.
-
----
-
-### Step 1 — Install expo-sharing
+**Step 1 — Install dependencies:**
 
 ```bash
 cd artifacts/margin
-npx expo install expo-sharing
+npx expo install expo-auth-session expo-web-browser
 ```
 
----
+**Step 2 — Add to app.json:**
 
-### Step 2 — Add imports to profile.tsx
-
-```tsx
-import * as FileSystem from "expo-file-system";
-import * as Sharing from "expo-sharing";
+```json
+"scheme": "margin",
+"plugins": [
+  ...,
+  "expo-auth-session"
+]
 ```
 
----
+**Step 3 — Add Google OAuth constants:**
 
-### Step 3 — Add export handler
+Create `artifacts/margin/lib/google.ts`:
 
-```tsx
-async function handleExport() {
-  Alert.alert(
-    "Export archive",
-    "Downloads all journal pages and transcriptions. This may take a moment.",
-    [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Export",
-        onPress: async () => {
-          try {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) return;
+```ts
+import * as AuthSession from "expo-auth-session";
+import * as WebBrowser from "expo-web-browser";
 
-            const { data: pages } = await supabase
-              .from("pages")
-              .select("id, page_number, image_path, transcription_text, journals!inner(title, user_id)")
-              .eq("journals.user_id", session.user.id)
-              .order("page_number");
+WebBrowser.maybeCompleteAuthSession();
 
-            if (!pages?.length) {
-              Alert.alert("Nothing to export", "You have no journal pages yet.");
-              return;
-            }
+const CLIENT_ID = "YOUR_GOOGLE_IOS_CLIENT_ID.apps.googleusercontent.com";
+const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
 
-            const dir = FileSystem.cacheDirectory + "margin_export/";
-            await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+export function useGoogleAuth() {
+  const discovery = AuthSession.useAutoDiscovery("https://accounts.google.com");
+  const redirectUri = AuthSession.makeRedirectUri({ scheme: "margin" });
 
-            for (const page of pages) {
-              const { data: blob } = await supabase.storage
-                .from("journal_pages")
-                .download(page.image_path);
-              if (blob) {
-                const reader = new FileReader();
-                reader.readAsDataURL(blob);
-                await new Promise<void>((resolve) => {
-                  reader.onloadend = async () => {
-                    const b64 = (reader.result as string).split(",")[1];
-                    await FileSystem.writeAsStringAsync(
-                      dir + `page_${page.page_number}.jpg`,
-                      b64,
-                      { encoding: FileSystem.EncodingType.Base64 },
-                    );
-                    resolve();
-                  };
-                });
-              }
-              if (page.transcription_text) {
-                await FileSystem.writeAsStringAsync(
-                  dir + `page_${page.page_number}.txt`,
-                  page.transcription_text,
-                );
-              }
-            }
-
-            // TODO for you: expo-file-system has no built-in ZIP. Options:
-            //   (a) install react-native-zip-archive and zip `dir` before sharing
-            //   (b) share the folder directly — on iOS this opens Files app without zipping
-            //   (c) build a server-side export Edge Function that streams a ZIP from Storage
-            // Current approach: share the folder directly (option b):
-            await Sharing.shareAsync(dir);
-          } catch (e) {
-            Alert.alert("Export failed", String(e));
-          }
-        },
-      },
-    ],
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: CLIENT_ID,
+      scopes: SCOPES,
+      redirectUri,
+      responseType: AuthSession.ResponseType.Code,
+      usePKCE: true,
+    },
+    discovery
   );
+
+  return { request, response, promptAsync, redirectUri, discovery };
 }
-```
 
----
+export async function uploadToDrive(
+  accessToken: string,
+  fileName: string,
+  content: string,
+): Promise<void> {
+  const metadata = { name: fileName, mimeType: "text/plain" };
+  const form = new FormData();
+  form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+  form.append("file", new Blob([content], { type: "text/plain" }));
 
-### Step 4 — Wire the row
-
-Find:
-```tsx
-<Row icon="download" label="Export full archive" value="ZIP / PDF" />
-```
-Change to:
-```tsx
-<Row icon="download" label="Export full archive" value="ZIP / PDF" onPress={handleExport} />
-```
-
----
-
-## 8. Clear cached images (real size)
-
-**What it does:** Shows the real cache directory size and clears it on confirmation.
-
-**The gap:** Shows hardcoded "340 MB", no `onPress`.
-
-**File to modify:** `artifacts/margin/app/(tabs)/profile.tsx`
-
----
-
-### Step 1 — Add FileSystem import
-
-```tsx
-import * as FileSystem from "expo-file-system";
-```
-(Skip if already added for section 7.)
-
----
-
-### Step 2 — Add cacheSize state and measurement
-
-Inside `ProfileScreen`:
-```tsx
-const [cacheSize, setCacheSize] = useState<string>("...");
-
-useEffect(() => {
-  if (!FileSystem.cacheDirectory) return;
-  FileSystem.getInfoAsync(FileSystem.cacheDirectory).then((info) => {
-    if (info.exists && "size" in info && info.size) {
-      const mb = info.size / 1024 / 1024;
-      setCacheSize(mb < 1 ? `${(info.size / 1024).toFixed(0)} KB` : `${mb.toFixed(0)} MB`);
-    } else {
-      setCacheSize("0 MB");
+  const res = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: form,
     }
-  });
-}, []);
-```
-
----
-
-### Step 3 — Add clear handler
-
-```tsx
-async function handleClearCache() {
-  Alert.alert(
-    "Clear cache",
-    "Removes cached image data. Your journals and transcriptions are unaffected.",
-    [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear",
-        style: "destructive",
-        onPress: async () => {
-          if (FileSystem.cacheDirectory) {
-            await FileSystem.deleteAsync(FileSystem.cacheDirectory, { idempotent: true });
-          }
-          setCacheSize("0 MB");
-        },
-      },
-    ],
   );
+  if (!res.ok) throw new Error(`Drive upload failed: ${res.status}`);
 }
 ```
 
----
+**Step 4 — Wire the toggle** in `profile.tsx` using `useGoogleAuth()` and store the access token
+in AsyncStorage (or SecureStore) under `"margin:google_token"`. On subsequent sessions, check
+for a stored token before re-prompting.
 
-### Step 4 — Wire the row
-
-Find:
-```tsx
-<Row
-  icon="trash-2"
-  label="Clear cached images"
-  value="340 MB"
-  last
-  destructive
-/>
-```
-Change to:
-```tsx
-<Row
-  icon="trash-2"
-  label="Clear cached images"
-  value={cacheSize}
-  last
-  destructive
-  onPress={handleClearCache}
-/>
-```
+**Watch out for:**
+- Access tokens expire after 1 hour. You need to store the refresh token and exchange it for a
+  new access token — the Google OAuth flow with `expo-auth-session` doesn't do this automatically.
+  Handle 401 responses by refreshing before retrying.
+- The iOS OAuth client ID in Google Cloud Console must have the exact bundle identifier you set
+  in `app.json`. A mismatch causes the redirect to fail silently.
+- App Store review: Apple requires that any Sign in with Google also offer Sign in with Apple.
+  Since Margin uses email/password auth (not Google Sign-In for auth), this rule doesn't apply
+  here — but mention "backup" in the feature description clearly, not "login with Google".
 
 ---
 
-## 9. Storage used (real data)
+## 6. Per-journal privacy
 
-**What it does:** Replaces the hardcoded "2.4 GB / 15 GB" with actual storage data.
+**Problem:** "Per-journal privacy" row in Privacy & Security has no `onPress` and no backing
+concept in the data model. A user cannot lock individual journals.
 
-**The gap:** `StorageRow` uses `const used = 2.4` and `const total = 15`, both hardcoded.
+**Data model change — run in Supabase SQL Editor:**
 
-**File to modify:** `artifacts/margin/app/(tabs)/profile.tsx`
-
-> **TODO for you:** Supabase Storage SDK doesn't expose per-file byte sizes from the client easily.
-> Two real options before implementing:
->
-> (a) Add a `total_storage_bytes bigint DEFAULT 0` column to your `profiles` table. Maintain it
->     with a DB trigger on `storage.objects` that reads `(metadata->>'size')::bigint` and adds/subtracts
->     on INSERT/DELETE.
->
-> (b) Call the Supabase management API or a service-role Edge Function to run:
->     `SELECT sum((metadata->>'size')::bigint) FROM storage.objects WHERE bucket_id = 'journal_pages'`
->
-> Until you pick an approach, add a comment so it's easy to find:
-
-Find in `StorageRow`:
-```tsx
-const used = 2.4;
-const total = 15;
+```sql
+ALTER TABLE journals ADD COLUMN IF NOT EXISTS is_private boolean DEFAULT false;
+CREATE INDEX IF NOT EXISTS journals_is_private_idx ON journals (user_id) WHERE is_private = true;
 ```
-Change to:
-```tsx
-const used = 2.4;   // STUB — replace with real query once §9 approach is decided
-const total = 15;   // STUB — replace with real plan limit if you add paid tiers
-```
+
+**Implementation plan:**
+
+1. In `journal/[id].tsx`, when the journal loads, check `journal.is_private`. If true, immediately
+   show a biometric prompt using `LocalAuthentication.authenticateAsync` before revealing any page
+   content. Show a blank screen while the prompt is pending. If auth fails, `router.back()`.
+
+2. In the journal reader header, add a lock icon button (beside the edit toggle) that calls:
+   ```tsx
+   await supabase.from("journals").update({ is_private: !journal.isPrivate }).eq("id", journalId);
+   ```
+
+3. In the library grid (`index.tsx`), journals where `is_private = true` should show a lock badge
+   on the cover tile. You'll need to add `is_private` to the journals query.
+
+4. Wire the "Per-journal privacy" row in `profile.tsx` to push to a screen that lists all journals
+   with a toggle for each — or simplify: remove the row from profile entirely since the lock is
+   managed per-journal inside the reader.
+
+**Watch out for:** The library grid currently fetches journals with `select("id, title, cover_color,
+cover_style, cover_image_url, created_at, page_count")`. Add `is_private` to that select. If you
+forget, the badge won't render and the auth gate won't know to fire.
 
 ---
 
-## 10. App links — Rate, Feedback, Help & FAQ
+## 7. Page reordering
 
-**What it does:** Opens the App Store review page, a feedback channel, and a help center URL.
+**Problem:** Pages are ordered by `page_number` set at insert time. Once captured, there's no way
+to change the order. If you photograph pages out of sequence, they stay in capture order forever.
 
-**The gap:** All three rows have no `onPress`.
+**Data model:** `page_number` is an integer. Reordering means updating multiple rows' `page_number`
+values atomically.
 
-**File to modify:** `artifacts/margin/app/(tabs)/profile.tsx`
+**Install:**
 
----
-
-### Step 1 — Add Linking to React Native imports
-
-Add `Linking` to the existing import block:
-```tsx
-import {
-  Alert,
-  Linking,
-  // ... rest unchanged
-} from "react-native";
+```bash
+cd artifacts/margin
+npx expo install react-native-draggable-flatlist
 ```
 
----
+**Implementation:**
 
-### Step 2 — Wire each row
+In `journal/[id].tsx`, add a "Reorder" mode alongside the existing `editMode`. When reorder mode
+is active, swap the regular `FlatList` for `DraggableFlatList` from the package above:
 
-Find:
 ```tsx
-<Row icon="star" label="Rate Margin" />
-<Row icon="message-circle" label="Send feedback" />
-<Row icon="help-circle" label="Help & FAQ" />
-```
-Change to:
-```tsx
-<Row
-  icon="star"
-  label="Rate Margin"
-  onPress={() => {
-    Linking.openURL("https://apps.apple.com/app/idTODO"); // TODO for you: App Store link
-  }}
-/>
-<Row
-  icon="message-circle"
-  label="Send feedback"
-  onPress={() => {
-    Linking.openURL("mailto:TODO@TODO.com?subject=Margin%20Feedback"); // TODO for you: feedback email or form URL
-  }}
-/>
-<Row
-  icon="help-circle"
-  label="Help & FAQ"
-  onPress={() => {
-    Linking.openURL("https://TODO"); // TODO for you: help center URL
+import DraggableFlatList, { RenderItemParams } from "react-native-draggable-flatlist";
+
+// In the header: a "Reorder" button that sets reorderMode = true
+// When reorderMode is active:
+<DraggableFlatList
+  data={pages}
+  keyExtractor={(item) => item.id}
+  renderItem={({ item, drag, isActive }: RenderItemParams<JournalPage>) => (
+    <TouchableOpacity onLongPress={drag} style={isActive ? styles.dragging : undefined}>
+      {/* simplified page thumbnail — not the full PageItem */}
+    </TouchableOpacity>
+  )}
+  onDragEnd={({ data: reordered }) => {
+    setPages(reordered);
+    // Persist new order
+    const updates = reordered.map((p, i) => ({ id: p.id, page_number: i + 1 }));
+    // Supabase has no bulk update — do it in a transaction via RPC
+    supabase.rpc("reorder_pages", { updates: JSON.stringify(updates) });
   }}
 />
 ```
 
-> **TODO for you:** Three URLs to fill in once you have them:
-> - App Store link — available after you submit; format `https://apps.apple.com/app/idXXXXXXXXX`
-> - Feedback destination — support email, Typeform, Notion form, Linear intake, etc.
-> - Help center — a Notion doc, hosted FAQ page, etc.
+**You need a new RPC for atomic reorder — run in Supabase SQL Editor:**
+
+```sql
+CREATE OR REPLACE FUNCTION reorder_pages(updates jsonb)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  item jsonb;
+BEGIN
+  FOR item IN SELECT * FROM jsonb_array_elements(updates)
+  LOOP
+    UPDATE pages
+    SET page_number = (item->>'page_number')::int
+    WHERE id = (item->>'id')::uuid
+      AND journal_id IN (
+        SELECT id FROM journals WHERE user_id = auth.uid()
+      );
+  END LOOP;
+END;
+$$;
+```
+
+**Watch out for:** `DraggableFlatList` and the regular `FlatList` use different scroll mechanics.
+Swapping between them based on `reorderMode` will cause a jarring re-mount. A cleaner approach
+is a separate "Reorder" sheet — a modal that shows a draggable list of page thumbnails and saves
+on dismiss. This keeps the reader's scroll behavior untouched.
+
+---
+
+## 8. Batch capture per-page transcription progress
+
+**Problem:** When you capture multiple pages in one session, the capture screen shows a single
+spinner for the whole batch. After navigating to the journal, some pages show "Transcribing…"
+and others are done — but there's no way to see which pages are still pending at a glance from
+the library or journal header.
+
+**What's already working:** The Realtime subscription in `journal/[id].tsx` now updates individual
+pages as they finish. The `PageItem` component already renders a spinner when
+`transcriptionStatus === "pending" || "processing"`.
+
+**What's missing:** The journal cover tile in the library grid has no indication that transcription
+is in progress. A user who leaves the app and comes back sees their journal with no cue that
+some pages are still processing.
+
+**Implementation:**
+
+1. Add `pending_count` to the journals query in `index.tsx`. You'll need a computed column or
+   a separate query. Easiest: add a DB view or a computed field via RPC.
+
+   Alternatively, just add `transcription_status` to the pages subquery in the journals list:
+
+   ```sql
+   -- A lightweight RPC that returns pending page count per journal
+   CREATE OR REPLACE FUNCTION journal_pending_counts(uid uuid)
+   RETURNS TABLE (journal_id uuid, pending_count bigint)
+   LANGUAGE sql SECURITY DEFINER AS $$
+     SELECT p.journal_id, count(*) AS pending_count
+     FROM pages p
+     JOIN journals j ON j.id = p.journal_id
+     WHERE j.user_id = uid
+       AND p.transcription_status IN ('pending', 'processing')
+       AND p.deleted_at IS NULL
+     GROUP BY p.journal_id;
+   $$;
+   ```
+
+2. In `index.tsx`, after fetching journals, call this RPC and merge the result onto each journal
+   item. Show a small pulsing indicator on journal covers where `pending_count > 0`.
+
+3. Wire a Realtime subscription in `index.tsx` on `pages` table UPDATE events filtered to this
+   user's journals — decrement the pending count for the affected journal when status changes to
+   "done" or "failed".

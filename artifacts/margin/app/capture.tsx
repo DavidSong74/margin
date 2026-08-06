@@ -100,6 +100,40 @@ export default function CaptureScreen() {
   const cameraRef = useRef<CameraView>(null);
   const flashAnim = useRef(new Animated.Value(0)).current;
 
+  // ── Crop photo to match the on-screen frame ───────────
+  // The CameraView fills the screen in "cover" mode. The captured photo
+  // is at full sensor resolution and wider than what the frame shows.
+  // We crop it to exactly the region the frame outlined.
+
+  const cropToFrame = useCallback(async (
+    uri: string,
+    photoW: number,
+    photoH: number,
+  ): Promise<string> => {
+    const frameTopOnScreen = (SCREEN_H - FRAME_H) / 2 - 20;
+
+    // Scale factor for "cover" — whichever axis fills first
+    const previewScale = Math.max(SCREEN_W / photoW, SCREEN_H / photoH);
+
+    // Where the photo's top-left corner sits in screen space (may be negative)
+    const photoScreenLeft = (SCREEN_W - photoW * previewScale) / 2;
+    const photoScreenTop  = (SCREEN_H - photoH * previewScale) / 2;
+
+    // Frame position in screen space → photo pixels
+    const frameScreenLeft = (SCREEN_W - FRAME_W) / 2;
+    const originX = Math.max(0, Math.round((frameScreenLeft - photoScreenLeft) / previewScale));
+    const originY = Math.max(0, Math.round((frameTopOnScreen  - photoScreenTop)  / previewScale));
+    const cropW   = Math.min(Math.round(FRAME_W / previewScale), photoW - originX);
+    const cropH   = Math.min(Math.round(FRAME_H / previewScale), photoH - originY);
+
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ crop: { originX, originY, width: cropW, height: cropH } }],
+      { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG },
+    );
+    return result.uri;
+  }, [SCREEN_W, SCREEN_H, FRAME_W, FRAME_H]);
+
   // ── Capture ────────────────────────────────────────────
   // All hooks must be declared before any early returns.
 
@@ -116,11 +150,12 @@ export default function CaptureScreen() {
     const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, skipProcessing: false });
     if (!photo) return;
 
-    const issue = await checkQuality(photo.uri);
+    const croppedUri = await cropToFrame(photo.uri, photo.width, photo.height);
+    const issue = await checkQuality(croppedUri);
     setQualityIssue(issue);
-    setCapturedUri(photo.uri);
+    setCapturedUri(croppedUri);
     setScreen("preview");
-  }, [flashAnim]);
+  }, [flashAnim, cropToFrame]);
 
   // ── Quality check ─────────────────────────────────────
   // Heuristic: compress to 100px wide, sample average pixel brightness.

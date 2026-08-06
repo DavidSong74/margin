@@ -70,6 +70,24 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Forbidden" }, 403);
   }
 
+  // ── 3b. Rate limit: max 30 transcriptions per user per hour ──
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { data: userJournals } = await adminClient
+    .from("journals")
+    .select("id")
+    .eq("user_id", user.id);
+  const journalIds = (userJournals ?? []).map((j: { id: string }) => j.id);
+  if (journalIds.length > 0) {
+    const { count } = await adminClient
+      .from("pages")
+      .select("id", { count: "exact", head: true })
+      .in("journal_id", journalIds)
+      .gte("created_at", oneHourAgo);
+    if ((count ?? 0) >= 30) {
+      return json({ error: "Rate limit exceeded. Try again in an hour." }, 429);
+    }
+  }
+
   // ── 4. Mark page as processing ───────────────────────────
   await adminClient
     .from("pages")

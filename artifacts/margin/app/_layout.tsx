@@ -12,7 +12,9 @@ import {
 } from "@expo-google-fonts/playfair-display";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
+import Constants from "expo-constants";
 import { useFonts } from "expo-font";
+import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -28,6 +30,31 @@ import { ThemeProvider } from "@/hooks/useTheme";
 import { useColors } from "@/hooks/useColors";
 
 SplashScreen.preventAutoHideAsync();
+
+// ── Push token registration ────────────────────────────────────────────────────
+// Silently registers an Expo push token when the user has already granted
+// notification permissions. Does not prompt — permission is requested by the
+// user via the Notifications section in profile.tsx.
+
+async function registerPushToken(userId: string) {
+  try {
+    // Expo Go dropped Android push support in SDK 53; skip to avoid the console error
+    if (Constants.executionEnvironment === "storeClient") return;
+
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== "granted") return;
+
+    const tokenData = await Notifications.getExpoPushTokenAsync();
+    if (!tokenData.data) return;
+
+    await supabase.from("push_tokens").upsert(
+      { user_id: userId, token: tokenData.data },
+      { onConflict: "token" }
+    );
+  } catch {
+    // Non-critical — never crash the app over a missing push token
+  }
+}
 
 // ── §4: App lock gate — renders inside ThemeProvider so useColors works ───────
 
@@ -137,12 +164,18 @@ export default function RootLayout() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setSessionInitialized(true);
+      if (session?.user) {
+        registerPushToken(session.user.id);
+      }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      if (session?.user) {
+        registerPushToken(session.user.id);
+      }
     });
 
     return () => subscription.unsubscribe();

@@ -25,6 +25,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import * as LocalAuthentication from "expo-local-authentication";
+
 import { useColors } from "@/hooks/useColors";
 import { supabase } from "@/lib/supabase";
 import type { PendingCorrection } from "@/lib/database.types";
@@ -275,6 +277,16 @@ export default function JournalReaderScreen() {
   const [pages, setPages] = useState<JournalPage[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // ── Per-journal privacy ───────────────────────────────────────
+  const [isPrivate, setIsPrivate] = useState(false);
+  // 'checking' while biometric prompt is in-flight; 'unlocked' once passed
+  const [privacyState, setPrivacyState] = useState<"checking" | "unlocked">("checking");
+
+  // ── Page reorder ──────────────────────────────────────────────
+  const [reorderMode, setReorderMode] = useState(false);
+  const [reorderList, setReorderList] = useState<JournalPage[]>([]);
+  const [reorderSaving, setReorderSaving] = useState(false);
+
   // ── Reader state ─────────────────────────────────────────────
   const [currentPage, setCurrentPage] = useState(0);
   const [editMode, setEditMode] = useState(false);
@@ -364,12 +376,100 @@ export default function JournalReaderScreen() {
     }, [fetchPages])
   );
 
+  // ── Privacy gate: fetch is_private then trigger biometric ────
+  // Runs once on mount (not re-run on focus, so auth is only asked once per session).
+  useEffect(() => {
+    if (!journalId) return;
+
+    async function checkPrivacy() {
+      const { data } = await supabase
+        .from("journals")
+        .select("is_private")
+        .eq("id", journalId)
+        .single();
+
+      const privateJournal = data?.is_private ?? false;
+      setIsPrivate(privateJournal);
+
+      if (!privateJournal) {
+        setPrivacyState("unlocked");
+        return;
+      }
+
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      if (!hasHardware || !isEnrolled) {
+        // Biometrics not available — allow access (app lock provides device-level security)
+        setPrivacyState("unlocked");
+        return;
+      }
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: `Unlock "${title}"`,
+        fallbackLabel: "Use passcode",
+      });
+      if (result.success) {
+        setPrivacyState("unlocked");
+      } else {
+        router.back();
+      }
+    }
+
+    checkPrivacy();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [journalId]);
+
   // ── Persist last-read page ───────────────────────────────────
 
   useEffect(() => {
     if (!journalId || pages.length === 0) return;
     AsyncStorage.setItem(`margin:lastPage:${journalId}`, String(currentPage));
   }, [currentPage, journalId, pages.length]);
+
+  // ── Realtime: update page when transcription finishes ────────
+
+  useEffect(() => {
+    if (!journalId) return;
+
+    const channel = supabase
+      .channel(`journal-pages-${journalId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "pages",
+          filter: `journal_id=eq.${journalId}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            id: string;
+            transcription_text: string | null;
+            transcription_status: "pending" | "processing" | "done" | "failed";
+            pending_corrections: Array<{ original: string; suggested: string }>;
+            correction_count: number;
+          };
+          setPages((prev) =>
+            prev.map((p) =>
+              p.id === row.id
+                ? {
+                    ...p,
+                    transcriptionText: row.transcription_text,
+                    transcriptionStatus: row.transcription_status,
+                    pendingCorrections: row.pending_corrections ?? [],
+                    correctionCount: row.correction_count ?? 0,
+                  }
+                : p
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [journalId]);
 
   // ── Soft-delete current page ─────────────────────────────────
 
@@ -559,6 +659,90 @@ export default function JournalReaderScreen() {
     [corrModalPageIdx, corrModalCorrIdx, pages, finishCorrectionSession]
   );
 
+  // ── Retry failed transcription ───────────────────────────────
+
+  const handleRetryTranscription = useCallback(async () => {
+    const page = pages[currentPage];
+    if (!page) return;
+
+    // Immediately show the spinner on this page — hides the retry button
+    setPages((prev) =>
+      prev.map((p, i) =>
+        i === currentPage ? { ...p, transcriptionStatus: "pending" } : p
+      )
+    );
+
+    const { error } = await supabase.functions.invoke("transcribe", {
+      body: { page_id: page.id },
+    });
+
+    if (error) {
+      // Revert locally so the retry button reappears.
+      // If the function reached the server and failed internally, Realtime will
+      // also fire "failed" — the revert is a safety net for network-level errors
+      // where Realtime won't fire because the DB was never updated.
+      setPages((prev) =>
+        prev.map((p, i) =>
+          i === currentPage ? { ...p, transcriptionStatus: "failed" } : p
+        )
+      );
+    }
+    // On success, the Realtime subscription updates status to "done" automatically
+  }, [pages, currentPage]);
+
+  // ── Per-journal privacy toggle ───────────────────────────────
+
+  const togglePrivacy = useCallback(async () => {
+    const newValue = !isPrivate;
+    await supabase
+      .from("journals")
+      .update({ is_private: newValue })
+      .eq("id", journalId);
+    setIsPrivate(newValue);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(
+      newValue ? "Journal locked" : "Journal unlocked",
+      newValue
+        ? "This journal now requires Face ID or Touch ID to open."
+        : "This journal can be opened without biometric authentication.",
+    );
+  }, [isPrivate, journalId]);
+
+  // ── Page reorder ─────────────────────────────────────────────
+
+  const openReorder = useCallback(() => {
+    setReorderList([...pages]);
+    setReorderMode(true);
+  }, [pages]);
+
+  const movePage = useCallback((from: number, to: number) => {
+    setReorderList((prev) => {
+      const arr = [...prev];
+      const [item] = arr.splice(from, 1);
+      arr.splice(to, 0, item);
+      return arr;
+    });
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, []);
+
+  const saveReorder = useCallback(async () => {
+    setReorderSaving(true);
+    try {
+      await supabase.rpc("reorder_pages", {
+        p_journal_id: journalId,
+        p_page_ids: reorderList.map((p) => p.id),
+      });
+      setPages(reorderList.map((p, i) => ({ ...p, pageNumber: i + 1 })));
+      setReorderMode(false);
+      setReorderList([]);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      Alert.alert("Error", "Could not save page order. Please try again.");
+    } finally {
+      setReorderSaving(false);
+    }
+  }, [journalId, reorderList]);
+
   // ── Memoized FlatList renderItem ────────────────────────────
 
   const renderPageItem = useCallback(
@@ -596,9 +780,9 @@ export default function JournalReaderScreen() {
   const corrCurrent = corrCorrections[corrModalCorrIdx];
   const corrTotal = corrCorrections.length;
 
-  // ── Loading state ────────────────────────────────────────────
+  // ── Loading state (pages + privacy check) ───────────────────
 
-  if (loading) {
+  if (loading || privacyState === "checking") {
     return (
       <View
         style={[
@@ -614,7 +798,7 @@ export default function JournalReaderScreen() {
             { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
           ]}
         >
-          Loading pages…
+          {privacyState === "checking" && isPrivate ? "Authenticating…" : "Loading pages…"}
         </Text>
       </View>
     );
@@ -725,14 +909,50 @@ export default function JournalReaderScreen() {
             </Text>
 
             {editMode && (
+              <>
+                <TouchableOpacity
+                  style={styles.headerIconBtn}
+                  onPress={togglePrivacy}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={isPrivate ? "Unlock this journal" : "Lock this journal"}
+                >
+                  <Feather
+                    name={isPrivate ? "lock" : "unlock"}
+                    size={20}
+                    color={isPrivate ? colors.primary : colors.mutedForeground}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.headerIconBtn}
+                  onPress={openReorder}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Reorder pages"
+                >
+                  <Feather name="list" size={20} color={colors.foreground} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.deletePageBtn}
+                  onPress={handleDeleteCurrentPage}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete this page"
+                >
+                  <Feather name="trash-2" size={20} color={colors.destructive} />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {pages[currentPage]?.transcriptionStatus === "failed" && (
               <TouchableOpacity
-                style={styles.deletePageBtn}
-                onPress={handleDeleteCurrentPage}
+                style={styles.headerIconBtn}
+                onPress={handleRetryTranscription}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 accessibilityRole="button"
-                accessibilityLabel="Delete this page"
+                accessibilityLabel="Retry transcription"
               >
-                <Feather name="trash-2" size={20} color={colors.destructive} />
+                <Feather name="refresh-cw" size={20} color={colors.primary} />
               </TouchableOpacity>
             )}
 
@@ -920,6 +1140,113 @@ export default function JournalReaderScreen() {
           <Feather name="camera" size={24} color="#fff" />
         </TouchableOpacity>
       )}
+
+      {/* ── Reorder modal ──────────────────────────────────── */}
+      <Modal
+        visible={reorderMode}
+        animationType="slide"
+        onRequestClose={() => { setReorderMode(false); setReorderList([]); }}
+      >
+        <View style={[styles.root, { backgroundColor: colors.background, paddingTop: pt }]}>
+          {/* Modal header */}
+          <View style={[styles.header, { paddingHorizontal: H_PAD }]}>
+            <TouchableOpacity
+              onPress={() => { setReorderMode(false); setReorderList([]); }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text
+                style={[
+                  styles.reorderActionText,
+                  { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+                ]}
+              >
+                Cancel
+              </Text>
+            </TouchableOpacity>
+            <Text
+              style={[
+                styles.headerTitle,
+                { color: colors.foreground, fontFamily: "PlayfairDisplay_600SemiBold" },
+              ]}
+            >
+              Reorder Pages
+            </Text>
+            <TouchableOpacity
+              onPress={saveReorder}
+              disabled={reorderSaving}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              {reorderSaving ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Text
+                  style={[
+                    styles.reorderActionText,
+                    { color: colors.primary, fontFamily: "Inter_600SemiBold" },
+                  ]}
+                >
+                  Done
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <FlatList
+            data={reorderList}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ paddingHorizontal: H_PAD, paddingTop: 8, paddingBottom: 40 }}
+            renderItem={({ item, index }) => (
+              <View
+                style={[
+                  styles.reorderItem,
+                  { borderBottomColor: colors.border },
+                ]}
+              >
+                {item.signedImageUrl ? (
+                  <Image
+                    source={{ uri: item.signedImageUrl }}
+                    style={[styles.reorderThumb, { borderColor: colors.border }]}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.reorderThumb,
+                      { backgroundColor: colors.muted, borderColor: colors.border },
+                    ]}
+                  />
+                )}
+                <Text
+                  style={[
+                    styles.reorderPageLabel,
+                    { color: colors.foreground, fontFamily: "Inter_500Medium" },
+                  ]}
+                >
+                  Page {index + 1}
+                </Text>
+                <View style={styles.reorderArrows}>
+                  <TouchableOpacity
+                    onPress={() => movePage(index, index - 1)}
+                    disabled={index === 0}
+                    style={{ opacity: index === 0 ? 0.25 : 1 }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Feather name="chevron-up" size={22} color={colors.foreground} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => movePage(index, index + 1)}
+                    disabled={index === reorderList.length - 1}
+                    style={{ opacity: index === reorderList.length - 1 ? 0.25 : 1 }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Feather name="chevron-down" size={22} color={colors.foreground} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          />
+        </View>
+      </Modal>
 
       {/* ── Correction modal ───────────────────────────────── */}
       <Modal
@@ -1394,7 +1721,33 @@ const styles = StyleSheet.create({
   // Delete page button (visible in edit mode)
   deletePageBtn: {
     padding: 6,
-    marginRight: 6,
+  },
+
+  // Lock / reorder buttons in header edit mode
+  headerIconBtn: {
+    padding: 6,
+  },
+
+  // Reorder modal
+  reorderActionText: { fontSize: 15 },
+  reorderItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  reorderThumb: {
+    width: 48,
+    height: 64,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  reorderPageLabel: { flex: 1, fontSize: 15 },
+  reorderArrows: {
+    flexDirection: "column",
+    gap: 4,
+    alignItems: "center",
   },
 
   // Full-screen image zoom viewer

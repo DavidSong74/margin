@@ -1,8 +1,9 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect, router } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Image,
   Platform,
@@ -36,6 +37,8 @@ interface JournalItem {
   coverImagePath?: string; // storage path (for signed URL generation)
   pageCount: number;
   createdAt: string;
+  isPrivate: boolean;
+  pendingCount: number;
 }
 
 type JournalRow = Database["public"]["Tables"]["journals"]["Row"] & {
@@ -113,6 +116,20 @@ function JournalCover({
           {journal.title}
         </Text>
       </View>
+
+      {/* Lock badge — top right corner */}
+      {journal.isPrivate && (
+        <View style={styles.lockBadge}>
+          <Feather name="lock" size={10} color="#fff" />
+        </View>
+      )}
+
+      {/* Pending transcription indicator — bottom right corner */}
+      {journal.pendingCount > 0 && (
+        <View style={styles.pendingBadge}>
+          <ActivityIndicator size="small" color="#fff" style={{ transform: [{ scale: 0.65 }] }} />
+        </View>
+      )}
     </View>
   );
 }
@@ -372,9 +389,29 @@ export default function LibraryScreen() {
         coverImagePath: r.cover_image_url ?? undefined,
         pageCount: r.pages?.[0]?.count ?? 0,
         createdAt: r.created_at,
+        isPrivate: r.is_private ?? false,
+        pendingCount: 0, // populated below via journal_pending_counts RPC
       }));
 
       setJournals(mapped);
+
+      // Fetch pending transcription counts in one batch call
+      const ids = mapped.map((j) => j.id);
+      if (ids.length > 0) {
+        const { data: counts } = await supabase.rpc("journal_pending_counts", {
+          p_journal_ids: ids,
+        });
+        if (counts) {
+          const countMap = Object.fromEntries(
+            (counts as { journal_id: string; pending_count: number }[]).map(
+              (r) => [r.journal_id, r.pending_count]
+            )
+          );
+          setJournals((prev) =>
+            prev.map((j) => ({ ...j, pendingCount: countMap[j.id] ?? 0 }))
+          );
+        }
+      }
     } catch (err) {
       console.error("[Library] fetchJournals error:", err);
     } finally {
@@ -388,6 +425,51 @@ export default function LibraryScreen() {
       fetchJournals();
     }, [fetchJournals])
   );
+
+  // ── Realtime: update pending counts when a transcription finishes ──────────
+
+  // Keep journal IDs in a ref so the Realtime callback doesn't need journals
+  // in its closure (avoids recreating the channel on every journals update).
+  const journalIdsRef = useRef<string[]>([]);
+  useEffect(() => {
+    journalIdsRef.current = journals.map((j) => j.id);
+  }, [journals]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("library-transcription-updates")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "pages" },
+        async (payload) => {
+          const row = payload.new as { journal_id: string; transcription_status: string };
+          if (
+            (row.transcription_status === "done" || row.transcription_status === "failed") &&
+            journalIdsRef.current.includes(row.journal_id)
+          ) {
+            // Re-fetch counts for all known journals
+            const { data: counts } = await supabase.rpc("journal_pending_counts", {
+              p_journal_ids: journalIdsRef.current,
+            });
+            if (counts) {
+              const countMap = Object.fromEntries(
+                (counts as { journal_id: string; pending_count: number }[]).map(
+                  (r) => [r.journal_id, r.pending_count]
+                )
+              );
+              setJournals((prev) =>
+                prev.map((j) => ({ ...j, pendingCount: countMap[j.id] ?? 0 }))
+              );
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []); // channel created once; journal list updates via journalIdsRef
 
   // ── Filtering ──────────────────────────────────────────────
 
@@ -660,6 +742,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     letterSpacing: 0.1,
+  },
+
+  lockBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pendingBadge: {
+    position: "absolute",
+    bottom: 8,
+    right: 8,
+    zIndex: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   newTile: {

@@ -15,6 +15,7 @@
     },
     "ios": {
       "supportsTablet": false,
+      "bundleIdentifier": "com.davidcode.margin",
       "infoPlist": {
         "NSCameraUsageDescription": "Margin needs camera access to photograph your journal pages.",
         "NSPhotoLibraryUsageDescription": "Margin needs photo library access to select journal cover images.",
@@ -22,6 +23,7 @@
       }
     },
     "android": {
+      "package": "com.davidcode.margin",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -40,7 +42,14 @@
       ],
       "expo-font",
       "expo-web-browser",
-      "expo-camera"
+      "expo-camera",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#7d9b76"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
