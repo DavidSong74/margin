@@ -1,9 +1,11 @@
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect, router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -70,8 +72,46 @@ const PageItem = React.memo(function PageItem({
   onUpdateText: (text: string) => void;
   onOpenCorrection: (index: number) => void;
 }) {
+  const [zoomVisible, setZoomVisible] = useState(false);
+
   return (
     <View style={{ width: effectiveW }}>
+      {/* Full-screen zoom viewer */}
+      <Modal
+        visible={zoomVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setZoomVisible(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.zoomOverlay}>
+          <TouchableOpacity
+            style={styles.zoomClose}
+            onPress={() => setZoomVisible(false)}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Feather name="x" size={24} color="#fff" />
+          </TouchableOpacity>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.zoomScrollContent}
+            maximumZoomScale={4}
+            minimumZoomScale={1}
+            showsVerticalScrollIndicator={false}
+            showsHorizontalScrollIndicator={false}
+            centerContent
+          >
+            {page.signedImageUrl ? (
+              <Image
+                source={{ uri: page.signedImageUrl }}
+                style={styles.zoomImage}
+                resizeMode="contain"
+              />
+            ) : null}
+          </ScrollView>
+        </View>
+      </Modal>
+
       <View style={styles.pageCenter}>
         <View style={[styles.pageColumn, { maxWidth: MAX_CONTENT_W }]}>
           {/* ── Original image view ────────────────── */}
@@ -81,15 +121,20 @@ const PageItem = React.memo(function PageItem({
               showsVerticalScrollIndicator={false}
             >
               {page.signedImageUrl ? (
-                <Image
-                  source={{ uri: page.signedImageUrl }}
-                  style={[
-                    styles.originalImage,
-                    { borderColor: colors.border },
-                  ]}
-                  resizeMode="contain"
-                  accessibilityLabel={`Original handwritten photo of page ${index + 1}`}
-                />
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => setZoomVisible(true)}
+                >
+                  <Image
+                    source={{ uri: page.signedImageUrl }}
+                    style={[
+                      styles.originalImage,
+                      { borderColor: colors.border },
+                    ]}
+                    resizeMode="contain"
+                    accessibilityLabel={`Original handwritten photo of page ${index + 1}. Tap to zoom.`}
+                  />
+                </TouchableOpacity>
               ) : (
                 <View
                   style={[
@@ -257,6 +302,7 @@ export default function JournalReaderScreen() {
           "id, page_number, image_path, thumbnail_path, transcription_text, transcription_status, pending_corrections, correction_count"
         )
         .eq("journal_id", journalId)
+        .is("deleted_at", null)
         .order("page_number");
 
       if (error) throw error;
@@ -289,11 +335,20 @@ export default function JournalReaderScreen() {
       }));
 
       setPages(mapped);
-      // Jump to the requested page (e.g. from a search result) without animation
-      if (initialPage > 0 && initialPage < mapped.length) {
-        setCurrentPage(initialPage);
+
+      // Determine which page to open: explicit route param takes priority, then AsyncStorage
+      let targetPage = initialPage;
+      if (targetPage === 0) {
+        const saved = await AsyncStorage.getItem(`margin:lastPage:${journalId}`);
+        if (saved !== null) {
+          const n = parseInt(saved, 10);
+          if (Number.isFinite(n) && n > 0 && n < mapped.length) targetPage = n;
+        }
+      }
+      if (targetPage > 0) {
+        setCurrentPage(targetPage);
         requestAnimationFrame(() => {
-          scrollRef.current?.scrollToOffset({ offset: initialPage * effectiveW, animated: false });
+          scrollRef.current?.scrollToOffset({ offset: targetPage * effectiveW, animated: false });
         });
       }
     } catch (err) {
@@ -308,6 +363,48 @@ export default function JournalReaderScreen() {
       fetchPages();
     }, [fetchPages])
   );
+
+  // ── Persist last-read page ───────────────────────────────────
+
+  useEffect(() => {
+    if (!journalId || pages.length === 0) return;
+    AsyncStorage.setItem(`margin:lastPage:${journalId}`, String(currentPage));
+  }, [currentPage, journalId, pages.length]);
+
+  // ── Soft-delete current page ─────────────────────────────────
+
+  const handleDeleteCurrentPage = useCallback(() => {
+    const page = pages[currentPage];
+    if (!page) return;
+    Alert.alert(
+      `Delete page ${page.pageNumber}?`,
+      "Available to restore for 30 days in Settings → Deleted Pages.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            await supabase
+              .from("pages")
+              .update({ deleted_at: new Date().toISOString() })
+              .eq("id", page.id);
+            const remaining = pages.filter((_, i) => i !== currentPage);
+            if (remaining.length === 0) {
+              router.back();
+              return;
+            }
+            setPages(remaining);
+            const newIdx = Math.min(currentPage, remaining.length - 1);
+            setCurrentPage(newIdx);
+            requestAnimationFrame(() => {
+              scrollRef.current?.scrollToOffset({ offset: newIdx * effectiveW, animated: false });
+            });
+          },
+        },
+      ]
+    );
+  }, [pages, currentPage, effectiveW]);
 
   // ── Navigation ───────────────────────────────────────────────
 
@@ -626,6 +723,18 @@ export default function JournalReaderScreen() {
             >
               {title}
             </Text>
+
+            {editMode && (
+              <TouchableOpacity
+                style={styles.deletePageBtn}
+                onPress={handleDeleteCurrentPage}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Delete this page"
+              >
+                <Feather name="trash-2" size={20} color={colors.destructive} />
+              </TouchableOpacity>
+            )}
 
             <View style={styles.editToggle}>
               <Text
@@ -1280,5 +1389,34 @@ const styles = StyleSheet.create({
   corrDoneSub: {
     fontSize: 15,
     opacity: 0.8,
+  },
+
+  // Delete page button (visible in edit mode)
+  deletePageBtn: {
+    padding: 6,
+    marginRight: 6,
+  },
+
+  // Full-screen image zoom viewer
+  zoomOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+  },
+  zoomClose: {
+    position: "absolute",
+    top: 52,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+  },
+  zoomScrollContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomImage: {
+    width: "100%",
+    height: "100%",
+    aspectRatio: 3 / 4,
   },
 });

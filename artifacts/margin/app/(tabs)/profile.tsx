@@ -820,6 +820,11 @@ export default function ProfileScreen() {
             onPress={() => router.push("/glossary")}
           />
           <Row
+            icon="trash-2"
+            label="Deleted Pages"
+            onPress={() => router.push("/deleted-pages")}
+          />
+          <Row
             icon="cpu"
             label="AI transcription quality"
             value={transcriptionQuality.charAt(0).toUpperCase() + transcriptionQuality.slice(1)}

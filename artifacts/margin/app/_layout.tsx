@@ -78,7 +78,7 @@ function NavigationGuard({
     if (!initialized) return;
     const inTabs = segments[0] === "(tabs)";
     // Auth screen has no named segment. Any known authenticated route is NOT the auth screen.
-    const onAuthenticatedRoute = inTabs || segments[0] === "journal" || segments[0] === "capture" || segments[0] === "glossary";
+    const onAuthenticatedRoute = inTabs || segments[0] === "journal" || segments[0] === "capture" || segments[0] === "glossary" || segments[0] === "deleted-pages";
     if (session && !onAuthenticatedRoute) {
       router.replace("/(tabs)");
     } else if (!session && inTabs) {
@@ -104,6 +104,7 @@ function RootLayoutNav({
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="journal/[id]" />
         <Stack.Screen name="glossary" />
+        <Stack.Screen name="deleted-pages" />
         <Stack.Screen
           name="journal/new"
           options={{ presentation: "modal", animation: "slide_from_bottom" }}

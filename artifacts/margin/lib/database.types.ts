@@ -59,6 +59,7 @@ export interface Database {
           pending_corrections: Json;
           correction_count: number;
           resurfaced_at: string | null;
+          deleted_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -72,6 +73,7 @@ export interface Database {
           pending_corrections?: Json;
           correction_count?: number;
           resurfaced_at?: string | null;
+          deleted_at?: string | null;
           created_at?: string;
         };
         Update: {
@@ -85,6 +87,7 @@ export interface Database {
           pending_corrections?: Json;
           correction_count?: number;
           resurfaced_at?: string | null;
+          deleted_at?: string | null;
           created_at?: string;
         };
         Relationships: [
