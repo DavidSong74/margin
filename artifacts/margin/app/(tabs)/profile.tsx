@@ -619,7 +619,13 @@ export default function ProfileScreen() {
           style: "destructive",
           onPress: async () => {
             if (FileSystem.cacheDirectory) {
-              await FileSystem.deleteAsync(FileSystem.cacheDirectory, { idempotent: true });
+              // Android doesn't allow deleting the cache root itself; delete contents instead
+              const entries = await FileSystem.readDirectoryAsync(FileSystem.cacheDirectory);
+              await Promise.all(
+                entries.map((name) =>
+                  FileSystem.deleteAsync(FileSystem.cacheDirectory! + name, { idempotent: true })
+                )
+              );
             }
             setCacheSize("0 MB");
           },
