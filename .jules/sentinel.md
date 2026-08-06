@@ -1,0 +1,4 @@
+## 2025-02-12 - [Node.js URL Parsing DoS Vulnerability]
+**Vulnerability:** Node.js server environments in the project (Vite middleware) parsed user-provided inputs (`req.url`) directly with the native `new URL()` constructor without any error handling.
+**Learning:** Malformed URLs (like `http://%a` or `http://[::1]`) can cause the `new URL()` constructor to throw an unhandled `ERR_INVALID_URL` exception. In many Node.js middleware setups, an unhandled exception will crash the entire Node.js process. An attacker could exploit this by sending a malformed request to intentionally crash the server, leading to a Denial of Service (DoS) vulnerability.
+**Prevention:** Always wrap native `new URL()` constructors parsing user-provided inputs in `try...catch` blocks. Fail gracefully (e.g., return a 400 Bad Request) instead of allowing the unhandled exception to crash the process.
