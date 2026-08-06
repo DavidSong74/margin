@@ -37,6 +37,8 @@ function formatEntryDate(iso: string): string {
   });
 }
 
+const TAB_BAR_H = 84;
+
 // ── Main screen ───────────────────────────────────────────────
 
 export default function ReviewScreen() {
@@ -47,7 +49,7 @@ export default function ReviewScreen() {
   const [advancing, setAdvancing] = useState(false);
 
   const pt = Platform.OS === "web" ? 67 : insets.top;
-  const pb = Platform.OS === "web" ? 34 : insets.bottom;
+  const pb = Platform.OS === "web" ? 34 + TAB_BAR_H : insets.bottom + TAB_BAR_H;
 
   // ── Fetch a page to resurface ──────────────────────────────
 
