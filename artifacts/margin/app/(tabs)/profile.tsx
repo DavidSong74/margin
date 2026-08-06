@@ -809,6 +809,11 @@ export default function ProfileScreen() {
         <SectionCard>
           <Row icon="settings" label="New journal defaults" />
           <Row
+            icon="book-open"
+            label="Glossary"
+            onPress={() => router.push("/glossary")}
+          />
+          <Row
             icon="cpu"
             label="AI transcription quality"
             value={transcriptionQuality.charAt(0).toUpperCase() + transcriptionQuality.slice(1)}

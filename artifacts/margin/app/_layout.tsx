@@ -103,6 +103,7 @@ function RootLayoutNav({
         <Stack.Screen name="index" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="journal/[id]" />
+        <Stack.Screen name="glossary" />
         <Stack.Screen
           name="journal/new"
           options={{ presentation: "modal", animation: "slide_from_bottom" }}
