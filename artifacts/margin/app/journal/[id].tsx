@@ -123,8 +123,8 @@ const PageItem = React.memo(function PageItem({
                   styles.pageText,
                   styles.pageInput,
                   {
-                    color: "#4a3f35",
-                    backgroundColor: "#faf7f2",
+                    color: colors.foreground,
+                    backgroundColor: colors.card,
                     fontFamily: "PlayfairDisplay_400Regular",
                   },
                 ]}
@@ -196,7 +196,7 @@ const PageItem = React.memo(function PageItem({
                 <Text
                   style={[
                     styles.pageText,
-                    { color: "#4a3f35", fontFamily: "PlayfairDisplay_400Regular" },
+                    { color: colors.foreground, fontFamily: "PlayfairDisplay_400Regular" },
                   ]}
                   accessibilityLabel={`Transcription of page ${index + 1}`}
                 >

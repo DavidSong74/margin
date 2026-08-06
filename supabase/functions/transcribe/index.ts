@@ -135,6 +135,7 @@ Deno.serve(async (req: Request) => {
           ],
         },
       ],
+      thinkingConfig: { thinkingBudget: 0 },
     });
 
     // ── 8. Second Gemini pass — uncertain words ─────────────
@@ -163,6 +164,7 @@ Deno.serve(async (req: Request) => {
       generationConfig: {
         responseMimeType: "application/json",
       },
+      thinkingConfig: { thinkingBudget: 0 },
     });
 
     // Parse uncertain words — fail gracefully if Gemini returns malformed JSON
