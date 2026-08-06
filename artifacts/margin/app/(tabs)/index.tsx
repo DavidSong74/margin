@@ -231,6 +231,81 @@ function EmptyState() {
   );
 }
 
+// ── LibraryGridItem (memoized FlatList cell) ──────────────────
+
+const LibraryGridItem = React.memo(function LibraryGridItem({
+  item,
+  cardW,
+  cardH,
+  colors,
+}: {
+  item: GridItem;
+  cardW: number;
+  cardH: number;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={{ marginBottom: COL_GAP }}>
+      {item.type === "new" ? (
+        <TouchableOpacity
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push("/journal/new");
+          }}
+          activeOpacity={0.7}
+        >
+          <NewJournalTile cardW={cardW} cardH={cardH} />
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push({
+              pathname: "/journal/[id]",
+              params: {
+                id: item.journal.id,
+                title: item.journal.title,
+              },
+            });
+          }}
+          activeOpacity={0.82}
+        >
+          <JournalCover
+            journal={item.journal}
+            cardW={cardW}
+            cardH={cardH}
+          />
+          <Text
+            style={[
+              styles.journalName,
+              {
+                color: colors.foreground,
+                fontFamily: "Inter_600SemiBold",
+              },
+            ]}
+            numberOfLines={1}
+          >
+            {item.journal.title}
+          </Text>
+          <Text
+            style={[
+              styles.journalMeta,
+              {
+                color: colors.mutedForeground,
+                fontFamily: "Inter_400Regular",
+              },
+            ]}
+          >
+            {item.journal.pageCount}{" "}
+            {item.journal.pageCount === 1 ? "page" : "pages"} ·{" "}
+            {formatDate(item.journal.createdAt)}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+});
+
 // ── Main screen ──────────────────────────────────────────────
 
 export default function LibraryScreen() {
@@ -331,68 +406,17 @@ export default function LibraryScreen() {
 
   // ── Render helpers ─────────────────────────────────────────
 
-  function renderItem({ item }: { item: GridItem }) {
-    return (
-      <View style={{ marginBottom: COL_GAP }}>
-        {item.type === "new" ? (
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push("/journal/new");
-            }}
-            activeOpacity={0.7}
-          >
-            <NewJournalTile cardW={cardW} cardH={cardH} />
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              router.push({
-                pathname: "/journal/[id]",
-                params: {
-                  id: item.journal.id,
-                  title: item.journal.title,
-                },
-              });
-            }}
-            activeOpacity={0.82}
-          >
-            <JournalCover
-              journal={item.journal}
-              cardW={cardW}
-              cardH={cardH}
-            />
-            <Text
-              style={[
-                styles.journalName,
-                {
-                  color: colors.foreground,
-                  fontFamily: "Inter_600SemiBold",
-                },
-              ]}
-              numberOfLines={1}
-            >
-              {item.journal.title}
-            </Text>
-            <Text
-              style={[
-                styles.journalMeta,
-                {
-                  color: colors.mutedForeground,
-                  fontFamily: "Inter_400Regular",
-                },
-              ]}
-            >
-              {item.journal.pageCount}{" "}
-              {item.journal.pageCount === 1 ? "page" : "pages"} ·{" "}
-              {formatDate(item.journal.createdAt)}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  }
+  const renderItem = useCallback(
+    ({ item }: { item: GridItem }) => (
+      <LibraryGridItem
+        item={item}
+        cardW={cardW}
+        cardH={cardH}
+        colors={colors}
+      />
+    ),
+    [cardW, cardH, colors]
+  );
 
   // ── Header ─────────────────────────────────────────────────
 
