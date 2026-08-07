@@ -19,7 +19,7 @@ catalogs:
       specifier: ^5.90.21
       version: 5.100.9
     '@types/node':
-      specifier: ^25.3.3
+      specifier: ^25.6.2
       version: 25.6.2
     '@types/react':
       specifier: ^19.2.0
@@ -58,7 +58,7 @@ catalogs:
       specifier: ^4.21.0
       version: 4.21.0
     vite:
-      specifier: ^7.3.2
+      specifier: ^7.3.3
       version: 7.3.3
     zod:
       specifier: ^3.25.76
@@ -142,6 +142,10 @@ overrides:
 importers:
 
   .:
+    dependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.6.2
     devDependencies:
       prettier:
         specifier: ^3.8.3
@@ -176,6 +180,9 @@ importers:
       expo-notifications:
         specifier: ~0.32.17
         version: 0.32.17(expo@54.0.34)(react-native@0.81.5(@babel/core@7.29.0(supports-color@8.1.1))(@types/react@19.1.17)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)(supports-color@8.1.1)(typescript@5.9.3)
+      expo-secure-store:
+        specifier: ^57.0.1
+        version: 57.0.1(expo@54.0.34)
       expo-sharing:
         specifier: ~14.0.8
         version: 14.0.8(expo@54.0.34)
@@ -3210,6 +3217,11 @@ packages:
         optional: true
       react-server-dom-webpack:
         optional: true
+
+  expo-secure-store@57.0.1:
+    resolution: {integrity: sha512-tLa1VmSadOq19mA/dwkl99RbHyjLE0T1qqBYMY3/OsguZTI+rlrDy/DDJjupqlVtmr95hD7o1pYqx5aL+B4YMA==}
+    peerDependencies:
+      expo: '*'
 
   expo-server@1.0.6:
     resolution: {integrity: sha512-vb5TBtskvEdzYuW79lATXutOEBfW5m6U4EFpNjCVZTnI7S//SAsLQkYEpn+EDfn84m6VQfzSGkIVR6YPaScKFA==}
@@ -8581,6 +8593,10 @@ snapshots:
       - '@types/react'
       - '@types/react-dom'
       - supports-color
+
+  expo-secure-store@57.0.1(expo@54.0.34):
+    dependencies:
+      expo: 54.0.34(@babel/core@7.29.0(supports-color@8.1.1))(@expo/metro-runtime@6.1.2)(expo-router@6.0.24)(react-native@0.81.5(@babel/core@7.29.0(supports-color@8.1.1))(@types/react@19.1.17)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)(supports-color@8.1.1)(typescript@5.9.3)
 
   expo-server@1.0.6: {}
 
