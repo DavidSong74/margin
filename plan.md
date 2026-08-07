@@ -1,0 +1,6 @@
+1.  **Analyze current code**: The `gridData` in `artifacts/margin/app/(tabs)/index.tsx` is computed synchronously during every render by filtering `journals` and mapping them. Since it's fed to a `FlatList`, recreating this array on every render breaks `FlatList`'s internal pure component optimizations because the `data` array reference changes every time, even if `journals` and `searchText` haven't changed.
+2.  **Memoize `gridData`**: Wrap the computation of `filtered` and `gridData` in a `useMemo` hook. This ensures the array reference remains stable across renders unless `journals` or `searchText` change. This is explicitly recommended in the system instructions for Expo React Native performance: "Additionally, memoize the data array fed to `FlatList` (e.g., using `useMemo`) if derived from state, to maintain stable object references and prevent unnecessary full-list re-renders."
+3.  **Ensure `useMemo` is imported**: Update the `react` import in `artifacts/margin/app/(tabs)/index.tsx` to include `useMemo`.
+4.  **Create `.jules/bolt.md`**: Create a file containing the critical learning about `FlatList` optimization in this codebase.
+5.  **Pre-commit steps**: Run the required lint/typecheck steps before submitting the PR.
+6.  **Submit**: Commit the changes and submit the PR with a "⚡ Bolt: Memoize FlatList data in Library tab" message.

@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect, router } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -473,18 +473,20 @@ export default function LibraryScreen() {
 
   // ── Filtering ──────────────────────────────────────────────
 
-  const filtered = searchText.trim()
-    ? journals.filter((j) =>
-        j.title.toLowerCase().includes(searchText.toLowerCase())
-      )
-    : journals;
+  const filtered = useMemo(() => {
+    return searchText.trim()
+      ? journals.filter((j) =>
+          j.title.toLowerCase().includes(searchText.toLowerCase())
+        )
+      : journals;
+  }, [journals, searchText]);
 
   const isEmpty = !loading && filtered.length === 0;
 
-  const gridData: GridItem[] = [
+  const gridData: GridItem[] = useMemo(() => [
     { type: "new" },
     ...filtered.map((j) => ({ type: "journal" as const, journal: j })),
-  ];
+  ], [filtered]);
 
   // ── Render helpers ─────────────────────────────────────────
 
