@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION public.reorder_pages(
 )
 RETURNS void
 LANGUAGE plpgsql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = public
 AS $$
 DECLARE

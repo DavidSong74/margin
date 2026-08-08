@@ -10,7 +10,7 @@ RETURNS TABLE (
   pending_count bigint
 )
 LANGUAGE sql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = public
 AS $$
   SELECT

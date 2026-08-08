@@ -30,7 +30,7 @@ RETURNS TABLE (
   snippet       text
 )
 LANGUAGE sql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = public
 AS $$
   SELECT
