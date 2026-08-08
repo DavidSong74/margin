@@ -40,6 +40,91 @@ function urgencyColor(days: number, colors: ReturnType<typeof useColors>): strin
   return colors.mutedForeground;
 }
 
+// ── DeletedPageItem (memoized FlatList cell) ───────────────────
+
+interface DeletedPageItemProps {
+  item: DeletedPage;
+  colors: ReturnType<typeof useColors>;
+  isActing: boolean;
+  onRestore: (item: DeletedPage) => void;
+  onPermanentDelete: (item: DeletedPage) => void;
+}
+
+const DeletedPageItem = React.memo(function DeletedPageItem({
+  item,
+  colors,
+  isActing,
+  onRestore,
+  onPermanentDelete,
+}: DeletedPageItemProps) {
+  const dayColor = urgencyColor(item.days_remaining, colors);
+
+  return (
+    <View style={[styles.row, { borderColor: colors.border }]}>
+      {/* Left: journal info + snippet */}
+      <View style={styles.rowBody}>
+        <View style={styles.rowMeta}>
+          <Feather name="book-open" size={12} color={colors.mutedForeground} />
+          <Text
+            style={[styles.rowJournal, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}
+            numberOfLines={1}
+          >
+            {item.journal_title}
+          </Text>
+          <Text style={[styles.rowDot, { color: colors.border }]}>·</Text>
+          <Text style={[styles.rowPage, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+            p. {item.page_number}
+          </Text>
+        </View>
+
+        {item.transcription_text ? (
+          <Text
+            style={[styles.rowSnippet, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}
+            numberOfLines={2}
+          >
+            {item.transcription_text.trim()}
+          </Text>
+        ) : (
+          <Text style={[styles.rowSnippet, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+            No transcription
+          </Text>
+        )}
+
+        <Text style={[styles.rowExpiry, { color: dayColor, fontFamily: "Inter_400Regular" }]}>
+          {item.days_remaining === 0
+            ? "Expires today"
+            : `${item.days_remaining} day${item.days_remaining === 1 ? "" : "s"} remaining`}
+        </Text>
+      </View>
+
+      {/* Right: actions */}
+      {isActing ? (
+        <ActivityIndicator size="small" color={colors.primary} style={styles.actionArea} />
+      ) : (
+        <View style={styles.actionArea}>
+          <TouchableOpacity
+            onPress={() => onRestore(item)}
+            style={[styles.actionBtn, { backgroundColor: colors.primary + "18" }]}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Feather name="rotate-ccw" size={15} color={colors.primary} />
+            <Text style={[styles.actionLabel, { color: colors.primary, fontFamily: "Inter_600SemiBold" }]}>
+              Restore
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => onPermanentDelete(item)}
+            style={[styles.actionBtn, { backgroundColor: colors.destructive + "12" }]}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Feather name="trash-2" size={15} color={colors.destructive} />
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+});
+
 // ── Screen ─────────────────────────────────────────────────────
 
 export default function DeletedPagesScreen() {
@@ -94,7 +179,7 @@ export default function DeletedPagesScreen() {
 
   useEffect(() => { fetchDeleted(); }, [fetchDeleted]);
 
-  async function handleRestore(page: DeletedPage) {
+  const handleRestore = useCallback(async (page: DeletedPage) => {
     setActionId(page.id);
     await supabase
       .from("pages")
@@ -102,9 +187,9 @@ export default function DeletedPagesScreen() {
       .eq("id", page.id);
     setPages((prev) => prev.filter((p) => p.id !== page.id));
     setActionId(null);
-  }
+  }, []);
 
-  function handlePermanentDelete(page: DeletedPage) {
+  const handlePermanentDelete = useCallback((page: DeletedPage) => {
     Alert.alert(
       "Delete permanently?",
       `Page ${page.page_number} from "${page.journal_title}" will be gone forever.`,
@@ -122,77 +207,20 @@ export default function DeletedPagesScreen() {
         },
       ]
     );
-  }
+  }, []);
 
-  function renderItem({ item }: { item: DeletedPage }) {
-    const isActing = actionId === item.id;
-    const dayColor = urgencyColor(item.days_remaining, colors);
-
-    return (
-      <View style={[styles.row, { borderColor: colors.border }]}>
-        {/* Left: journal info + snippet */}
-        <View style={styles.rowBody}>
-          <View style={styles.rowMeta}>
-            <Feather name="book-open" size={12} color={colors.mutedForeground} />
-            <Text
-              style={[styles.rowJournal, { color: colors.mutedForeground, fontFamily: "Inter_500Medium" }]}
-              numberOfLines={1}
-            >
-              {item.journal_title}
-            </Text>
-            <Text style={[styles.rowDot, { color: colors.border }]}>·</Text>
-            <Text style={[styles.rowPage, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-              p. {item.page_number}
-            </Text>
-          </View>
-
-          {item.transcription_text ? (
-            <Text
-              style={[styles.rowSnippet, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}
-              numberOfLines={2}
-            >
-              {item.transcription_text.trim()}
-            </Text>
-          ) : (
-            <Text style={[styles.rowSnippet, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-              No transcription
-            </Text>
-          )}
-
-          <Text style={[styles.rowExpiry, { color: dayColor, fontFamily: "Inter_400Regular" }]}>
-            {item.days_remaining === 0
-              ? "Expires today"
-              : `${item.days_remaining} day${item.days_remaining === 1 ? "" : "s"} remaining`}
-          </Text>
-        </View>
-
-        {/* Right: actions */}
-        {isActing ? (
-          <ActivityIndicator size="small" color={colors.primary} style={styles.actionArea} />
-        ) : (
-          <View style={styles.actionArea}>
-            <TouchableOpacity
-              onPress={() => handleRestore(item)}
-              style={[styles.actionBtn, { backgroundColor: colors.primary + "18" }]}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              <Feather name="rotate-ccw" size={15} color={colors.primary} />
-              <Text style={[styles.actionLabel, { color: colors.primary, fontFamily: "Inter_600SemiBold" }]}>
-                Restore
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => handlePermanentDelete(item)}
-              style={[styles.actionBtn, { backgroundColor: colors.destructive + "12" }]}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              <Feather name="trash-2" size={15} color={colors.destructive} />
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    );
-  }
+  const renderItem = useCallback(
+    ({ item }: { item: DeletedPage }) => (
+      <DeletedPageItem
+        item={item}
+        colors={colors}
+        isActing={actionId === item.id}
+        onRestore={handleRestore}
+        onPermanentDelete={handlePermanentDelete}
+      />
+    ),
+    [colors, actionId, handleRestore, handlePermanentDelete]
+  );
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
