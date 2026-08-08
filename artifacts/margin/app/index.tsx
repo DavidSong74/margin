@@ -655,13 +655,13 @@ export default function AuthScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Dev-only bypass — not rendered in production builds */}
-            {__DEV__ && (
+            {/* Dev-only bypass — credentials from env, not rendered in production builds */}
+            {__DEV__ && process.env.EXPO_PUBLIC_DEV_EMAIL && process.env.EXPO_PUBLIC_DEV_PASSWORD && (
               <TouchableOpacity
                 onPress={async () => {
                   const { error } = await supabase.auth.signInWithPassword({
-                    email: "dev@margin.app",
-                    password: "devdevdev",
+                    email: process.env.EXPO_PUBLIC_DEV_EMAIL as string,
+                    password: process.env.EXPO_PUBLIC_DEV_PASSWORD as string,
                   });
                   if (error) Alert.alert("Dev login failed", error.message);
                 }}

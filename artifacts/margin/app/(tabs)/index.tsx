@@ -436,8 +436,14 @@ export default function LibraryScreen() {
   }, [journals]);
 
   useEffect(() => {
+    const channelName = "library-transcription-updates";
+    supabase
+      .getChannels()
+      .filter((ch) => ch.topic === `realtime:${channelName}`)
+      .forEach((ch) => supabase.removeChannel(ch));
+
     const channel = supabase
-      .channel("library-transcription-updates")
+      .channel(channelName)
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "pages" },

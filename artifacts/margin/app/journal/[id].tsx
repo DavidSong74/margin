@@ -382,36 +382,46 @@ export default function JournalReaderScreen() {
     if (!journalId) return;
 
     async function checkPrivacy() {
-      const { data } = await supabase
-        .from("journals")
-        .select("is_private")
-        .eq("id", journalId)
-        .single();
+      try {
+        const { data, error } = await supabase
+          .from("journals")
+          .select("is_private")
+          .eq("id", journalId)
+          .single();
 
-      const privateJournal = data?.is_private ?? false;
-      setIsPrivate(privateJournal);
+        if (error || !data) {
+          // Can't determine privacy status — fail open so the journal is usable
+          setPrivacyState("unlocked");
+          return;
+        }
 
-      if (!privateJournal) {
+        const privateJournal = data.is_private ?? false;
+        setIsPrivate(privateJournal);
+
+        if (!privateJournal) {
+          setPrivacyState("unlocked");
+          return;
+        }
+
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+        if (!hasHardware || !isEnrolled) {
+          setPrivacyState("unlocked");
+          return;
+        }
+
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: `Unlock "${title}"`,
+          fallbackLabel: "Use passcode",
+        });
+        if (result.success) {
+          setPrivacyState("unlocked");
+        } else {
+          router.back();
+        }
+      } catch {
+        // Never block the journal on an unexpected error
         setPrivacyState("unlocked");
-        return;
-      }
-
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
-      if (!hasHardware || !isEnrolled) {
-        // Biometrics not available — allow access (app lock provides device-level security)
-        setPrivacyState("unlocked");
-        return;
-      }
-
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: `Unlock "${title}"`,
-        fallbackLabel: "Use passcode",
-      });
-      if (result.success) {
-        setPrivacyState("unlocked");
-      } else {
-        router.back();
       }
     }
 
@@ -431,8 +441,16 @@ export default function JournalReaderScreen() {
   useEffect(() => {
     if (!journalId) return;
 
+    const channelName = `journal-pages-${journalId}`;
+    // Supabase caches channels by name; a stale subscribed channel causes
+    // "cannot add callbacks after subscribe()" on hot-reload / StrictMode.
+    supabase
+      .getChannels()
+      .filter((ch) => ch.topic === `realtime:${channelName}`)
+      .forEach((ch) => supabase.removeChannel(ch));
+
     const channel = supabase
-      .channel(`journal-pages-${journalId}`)
+      .channel(channelName)
       .on(
         "postgres_changes",
         {

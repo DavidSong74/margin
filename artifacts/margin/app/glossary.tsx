@@ -25,6 +25,109 @@ interface GlossaryEntry {
   updated_at: string;
 }
 
+// ── GlossaryItem (memoized FlatList cell) ─────────────────────
+
+interface GlossaryItemProps {
+  item: GlossaryEntry;
+  colors: ReturnType<typeof useColors>;
+  isEditing: boolean;
+  isSaving: boolean;
+  onEdit: (item: GlossaryEntry) => void;
+  onCancelEdit: () => void;
+  onSaveEdit: (item: GlossaryEntry, newText: string) => void;
+  onDelete: (item: GlossaryEntry) => void;
+}
+
+const GlossaryItem = React.memo(function GlossaryItem({
+  item,
+  colors,
+  isEditing,
+  isSaving,
+  onEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onDelete,
+}: GlossaryItemProps) {
+  const [localText, setLocalText] = useState(item.corrected_word);
+
+  useEffect(() => {
+    if (isEditing) setLocalText(item.corrected_word);
+  }, [isEditing, item.corrected_word]);
+
+  return (
+    <View style={styles.entryRow}>
+      <Text
+        style={[styles.originalWord, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}
+        numberOfLines={1}
+      >
+        {item.original_word}
+      </Text>
+
+      <Feather name="arrow-right" size={13} color={colors.mutedForeground} style={styles.arrow} />
+
+      {isEditing ? (
+        <TextInput
+          style={[styles.editInput, { color: colors.foreground, borderColor: colors.primary, fontFamily: "Inter_400Regular" }]}
+          value={localText}
+          onChangeText={setLocalText}
+          autoFocus
+          returnKeyType="done"
+          onSubmitEditing={() => onSaveEdit(item, localText)}
+        />
+      ) : (
+        <Text
+          style={[styles.correctedWord, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}
+          numberOfLines={1}
+        >
+          {item.corrected_word}
+        </Text>
+      )}
+
+      <View style={styles.entryActions}>
+        {isEditing ? (
+          <>
+            {isSaving ? (
+              <ActivityIndicator size="small" color={colors.primary} style={styles.actionBtn} />
+            ) : (
+              <TouchableOpacity
+                onPress={() => onSaveEdit(item, localText)}
+                style={styles.actionBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Feather name="check" size={17} color={colors.primary} />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={onCancelEdit}
+              style={styles.actionBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Feather name="x" size={17} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity
+              onPress={() => onEdit(item)}
+              style={styles.actionBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Feather name="edit-2" size={15} color={colors.mutedForeground} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => onDelete(item)}
+              style={styles.actionBtn}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Feather name="trash-2" size={15} color={colors.destructive} />
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    </View>
+  );
+});
+
 // ── Screen ─────────────────────────────────────────────────────
 
 export default function GlossaryScreen() {
@@ -36,7 +139,6 @@ export default function GlossaryScreen() {
   const [entries, setEntries] = useState<GlossaryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editText, setEditText] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const fetchEntries = useCallback(async () => {
@@ -54,7 +156,7 @@ export default function GlossaryScreen() {
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 
-  function handleDelete(entry: GlossaryEntry) {
+  const handleDelete = useCallback((entry: GlossaryEntry) => {
     Alert.alert(
       "Remove entry",
       `Remove "${entry.original_word} → ${entry.corrected_word}" from your glossary? Future transcriptions will no longer apply this correction.`,
@@ -70,10 +172,18 @@ export default function GlossaryScreen() {
         },
       ],
     );
-  }
+  }, []);
 
-  async function handleSaveEdit(entry: GlossaryEntry) {
-    const trimmed = editText.trim();
+  const handleEdit = useCallback((entry: GlossaryEntry) => {
+    setEditingId(entry.id);
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingId(null);
+  }, []);
+
+  const handleSaveEdit = useCallback(async (entry: GlossaryEntry, newText: string) => {
+    const trimmed = newText.trim();
     if (!trimmed || trimmed === entry.corrected_word) {
       setEditingId(null);
       return;
@@ -88,106 +198,23 @@ export default function GlossaryScreen() {
     );
     setSavingId(null);
     setEditingId(null);
-  }
+  }, []);
 
-  function renderItem({ item }: { item: GlossaryEntry }) {
-    const isEditing = editingId === item.id;
-    const isSaving = savingId === item.id;
-
-    return (
-      <View style={styles.entryRow}>
-        {/* Original word — struck through */}
-        <Text
-          style={[
-            styles.originalWord,
-            { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-          ]}
-          numberOfLines={1}
-        >
-          {item.original_word}
-        </Text>
-
-        <Feather
-          name="arrow-right"
-          size={13}
-          color={colors.mutedForeground}
-          style={styles.arrow}
-        />
-
-        {/* Corrected word — editable inline */}
-        {isEditing ? (
-          <TextInput
-            style={[
-              styles.editInput,
-              {
-                color: colors.foreground,
-                borderColor: colors.primary,
-                fontFamily: "Inter_400Regular",
-              },
-            ]}
-            value={editText}
-            onChangeText={setEditText}
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={() => handleSaveEdit(item)}
-          />
-        ) : (
-          <Text
-            style={[
-              styles.correctedWord,
-              { color: colors.foreground, fontFamily: "Inter_600SemiBold" },
-            ]}
-            numberOfLines={1}
-          >
-            {item.corrected_word}
-          </Text>
-        )}
-
-        {/* Action buttons */}
-        <View style={styles.entryActions}>
-          {isEditing ? (
-            <>
-              {isSaving ? (
-                <ActivityIndicator size="small" color={colors.primary} style={styles.actionBtn} />
-              ) : (
-                <TouchableOpacity
-                  onPress={() => handleSaveEdit(item)}
-                  style={styles.actionBtn}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Feather name="check" size={17} color={colors.primary} />
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity
-                onPress={() => setEditingId(null)}
-                style={styles.actionBtn}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Feather name="x" size={17} color={colors.mutedForeground} />
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <TouchableOpacity
-                onPress={() => { setEditingId(item.id); setEditText(item.corrected_word); }}
-                style={styles.actionBtn}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Feather name="edit-2" size={15} color={colors.mutedForeground} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => handleDelete(item)}
-                style={styles.actionBtn}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Feather name="trash-2" size={15} color={colors.destructive} />
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-      </View>
-    );
-  }
+  const renderItem = useCallback(
+    ({ item }: { item: GlossaryEntry }) => (
+      <GlossaryItem
+        item={item}
+        colors={colors}
+        isEditing={editingId === item.id}
+        isSaving={savingId === item.id}
+        onEdit={handleEdit}
+        onCancelEdit={handleCancelEdit}
+        onSaveEdit={handleSaveEdit}
+        onDelete={handleDelete}
+      />
+    ),
+    [colors, editingId, savingId, handleEdit, handleCancelEdit, handleSaveEdit, handleDelete]
+  );
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
