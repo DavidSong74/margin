@@ -381,7 +381,7 @@ The reader screen already shows a "3 to review" badge on pages where `correction
    ```sql
    create or replace function save_correction(
      p_page_id uuid, p_original text, p_corrected text, p_user_id uuid
-   ) returns void language plpgsql security definer as $$
+   ) returns void language plpgsql security invoker as $$
    begin
      insert into corrections (page_id, original_word, corrected_word)
        values (p_page_id, p_original, p_corrected);
@@ -477,7 +477,7 @@ The Search tab is a placeholder. Once pages have real transcription text, Postgr
    create or replace function search_pages(query text)
    returns table (page_id uuid, journal_id uuid, journal_title text,
                   page_number integer, snippet text)
-   language sql security definer as $$
+   language sql security invoker as $$
      select p.id, j.id, j.title, p.page_number,
             ts_headline('english', p.transcription_text, plainto_tsquery('english', query),
                         'MaxWords=20, MinWords=10') as snippet
@@ -529,7 +529,7 @@ The Review tab says "Resurface past entries and rediscover your memories" — th
 2. Create an RPC function:
    ```sql
    create or replace function get_resurface_page()
-   returns setof pages language sql security definer as $$
+   returns setof pages language sql security invoker as $$
      select * from pages p
      join journals j on j.id = p.journal_id
      where j.user_id = auth.uid()

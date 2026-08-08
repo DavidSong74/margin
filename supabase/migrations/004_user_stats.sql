@@ -5,7 +5,7 @@
 CREATE OR REPLACE FUNCTION public.get_user_storage_bytes()
 RETURNS bigint
 LANGUAGE sql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = public, storage
 AS $$
   SELECT COALESCE(
