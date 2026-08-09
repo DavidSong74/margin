@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { InboxOverlay } from "@/components/InboxOverlay";
 import { useColors } from "@/hooks/useColors";
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/lib/database.types";
@@ -339,6 +340,26 @@ export default function LibraryScreen() {
   const [searchText, setSearchText] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
 
+  // S2: Inbox overlay
+  const [inboxVisible, setInboxVisible] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [userInitial, setUserInitial] = useState("?");
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const email = session?.user?.email ?? "";
+      setUserInitial(email[0]?.toUpperCase() ?? "?");
+    });
+  }, []);
+
+  const fetchUnreadCount = useCallback(async () => {
+    const { count } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("read", false);
+    setUnreadCount(count ?? 0);
+  }, []);
+
   const pt = Platform.OS === "web" ? 67 : insets.top;
   const pb =
     Platform.OS === "web" ? 34 + TAB_BAR_H : insets.bottom + TAB_BAR_H;
@@ -396,7 +417,8 @@ export default function LibraryScreen() {
     useCallback(() => {
       setLoading(true);
       fetchJournals();
-    }, [fetchJournals])
+      fetchUnreadCount();
+    }, [fetchJournals, fetchUnreadCount])
   );
 
   // ── Realtime: update pending counts when a transcription finishes ──────────
@@ -499,13 +521,23 @@ export default function LibraryScreen() {
         <View style={styles.topActions}>
           <TouchableOpacity
             style={[styles.avatar, { backgroundColor: colors.primary }]}
-            onPress={() => Haptics.selectionAsync()}
+            onPress={() => {
+              Haptics.selectionAsync();
+              setInboxVisible(true);
+            }}
           >
             <Text
               style={[styles.avatarInitial, { fontFamily: "Inter_600SemiBold" }]}
             >
-              M
+              {userInitial}
             </Text>
+            {unreadCount > 0 && (
+              <View style={[styles.badge, { backgroundColor: colors.destructive }]}>
+                <Text style={styles.badgeText}>
+                  {unreadCount > 9 ? "9+" : String(unreadCount)}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -583,6 +615,11 @@ export default function LibraryScreen() {
   if (loading) {
     return (
       <View style={[styles.root, { backgroundColor: colors.background }]}>
+        <InboxOverlay
+          visible={inboxVisible}
+          onClose={() => setInboxVisible(false)}
+          onNotificationsRead={() => setUnreadCount(0)}
+        />
         {ListHeader}
         <View style={[styles.gridContent, styles.skeletonGrid]}>
           {[0, 1, 2, 3].map((i) => (
@@ -598,6 +635,11 @@ export default function LibraryScreen() {
   if (isEmpty && !searchText) {
     return (
       <View style={[styles.root, { backgroundColor: colors.background }]}>
+        <InboxOverlay
+          visible={inboxVisible}
+          onClose={() => setInboxVisible(false)}
+          onNotificationsRead={() => setUnreadCount(0)}
+        />
         {ListHeader}
         <EmptyState />
       </View>
@@ -608,6 +650,11 @@ export default function LibraryScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <InboxOverlay
+        visible={inboxVisible}
+        onClose={() => setInboxVisible(false)}
+        onNotificationsRead={() => setUnreadCount(0)}
+      />
       <FlatList
         data={gridData}
         keyExtractor={(item) =>
@@ -650,6 +697,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarInitial: { color: "#fff", fontSize: 15 },
+  badge: {
+    position: "absolute",
+    top: -3,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  badgeText: { color: "#fff", fontSize: 9, fontFamily: "Inter_700Bold" },
 
   greetingWrap: {
     paddingHorizontal: H_PAD,

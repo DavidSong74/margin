@@ -191,49 +191,60 @@ AS $$
 $$;
 
 -- List accepted friends for the current user.
+-- SECURITY DEFINER: joins auth.users to surface friend email.
 CREATE OR REPLACE FUNCTION public.get_friends()
 RETURNS TABLE (
   friend_id     uuid,
   friendship_id uuid,
+  friend_email  text,
   since         timestamptz
 )
 LANGUAGE sql
-SECURITY INVOKER
-SET search_path = public
+SECURITY DEFINER
+SET search_path = public, auth
 AS $$
   SELECT
-    CASE WHEN requester_id = auth.uid() THEN addressee_id ELSE requester_id END AS friend_id,
-    id   AS friendship_id,
-    updated_at AS since
-  FROM friendships
-  WHERE status = 'accepted'
-    AND (requester_id = auth.uid() OR addressee_id = auth.uid())
-  ORDER BY updated_at DESC;
+    CASE WHEN f.requester_id = auth.uid() THEN f.addressee_id ELSE f.requester_id END AS friend_id,
+    f.id   AS friendship_id,
+    u.email::text AS friend_email,
+    f.updated_at AS since
+  FROM friendships f
+  JOIN auth.users u ON u.id = CASE WHEN f.requester_id = auth.uid() THEN f.addressee_id ELSE f.requester_id END
+  WHERE f.status = 'accepted'
+    AND (f.requester_id = auth.uid() OR f.addressee_id = auth.uid())
+  ORDER BY f.updated_at DESC;
 $$;
 
 -- Pending friend requests addressed to me.
+-- SECURITY DEFINER: joins auth.users to surface requester email.
 CREATE OR REPLACE FUNCTION public.get_pending_friend_requests()
 RETURNS TABLE (
-  friendship_id uuid,
-  from_user_id  uuid,
-  created_at    timestamptz
+  friendship_id   uuid,
+  from_user_id    uuid,
+  from_user_email text,
+  created_at      timestamptz
 )
 LANGUAGE sql
-SECURITY INVOKER
-SET search_path = public
+SECURITY DEFINER
+SET search_path = public, auth
 AS $$
-  SELECT id AS friendship_id, requester_id AS from_user_id, created_at
-  FROM friendships
-  WHERE addressee_id = auth.uid()
-    AND status = 'pending'
-  ORDER BY created_at DESC;
+  SELECT f.id AS friendship_id, f.requester_id AS from_user_id,
+    u.email::text AS from_user_email,
+    f.created_at
+  FROM friendships f
+  JOIN auth.users u ON u.id = f.requester_id
+  WHERE f.addressee_id = auth.uid()
+    AND f.status = 'pending'
+  ORDER BY f.created_at DESC;
 $$;
 
 -- Feed entries from friends (own entries + friends' entries) with aggregates.
+-- SECURITY DEFINER: joins auth.users to surface author email.
 CREATE OR REPLACE FUNCTION public.get_feed(p_limit int DEFAULT 20, p_offset int DEFAULT 0)
 RETURNS TABLE (
   entry_id      uuid,
   user_id       uuid,
+  author_email  text,
   page_id       uuid,
   excerpt_text  text,
   share_type    text,
@@ -243,12 +254,13 @@ RETURNS TABLE (
   viewer_liked  boolean
 )
 LANGUAGE sql
-SECURITY INVOKER
-SET search_path = public
+SECURITY DEFINER
+SET search_path = public, auth
 AS $$
   SELECT
     se.id            AS entry_id,
     se.user_id,
+    u.email::text    AS author_email,
     se.page_id,
     se.excerpt_text,
     se.share_type,
@@ -257,6 +269,7 @@ AS $$
     COUNT(DISTINCT fc.id)              AS comment_count,
     BOOL_OR(fl.user_id = auth.uid())   AS viewer_liked
   FROM shared_entries se
+  JOIN auth.users u ON u.id = se.user_id
   LEFT JOIN feed_likes    fl ON fl.entry_id = se.id
   LEFT JOIN feed_comments fc ON fc.entry_id = se.id
   WHERE (
@@ -271,27 +284,32 @@ AS $$
         )
     )
   )
-  GROUP BY se.id, se.user_id, se.page_id, se.excerpt_text, se.share_type, se.created_at
+  GROUP BY se.id, se.user_id, u.email, se.page_id, se.excerpt_text, se.share_type, se.created_at
   ORDER BY se.created_at DESC
   LIMIT p_limit OFFSET p_offset;
 $$;
 
 -- Comments for a specific feed entry.
+-- SECURITY DEFINER: joins auth.users to surface commenter email.
 CREATE OR REPLACE FUNCTION public.get_comments(p_entry_id uuid)
 RETURNS TABLE (
   comment_id    uuid,
   user_id       uuid,
+  author_email  text,
   comment_text  text,
   created_at    timestamptz
 )
 LANGUAGE sql
-SECURITY INVOKER
-SET search_path = public
+SECURITY DEFINER
+SET search_path = public, auth
 AS $$
-  SELECT id AS comment_id, user_id, comment_text, created_at
-  FROM feed_comments
-  WHERE entry_id = p_entry_id
-  ORDER BY created_at;
+  SELECT fc.id AS comment_id, fc.user_id,
+    u.email::text AS author_email,
+    fc.comment_text, fc.created_at
+  FROM feed_comments fc
+  JOIN auth.users u ON u.id = fc.user_id
+  WHERE fc.entry_id = p_entry_id
+  ORDER BY fc.created_at;
 $$;
 
 

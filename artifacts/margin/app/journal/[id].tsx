@@ -66,6 +66,7 @@ const PageItem = React.memo(function PageItem({
   dimmed,
   onUpdateText,
   onOpenCorrection,
+  onTextSelection,
 }: {
   page: JournalPage;
   index: number;
@@ -76,6 +77,7 @@ const PageItem = React.memo(function PageItem({
   dimmed?: boolean;
   onUpdateText: (text: string) => void;
   onOpenCorrection: (index: number) => void;
+  onTextSelection?: (sel: { start: number; end: number } | null) => void;
 }) {
   const [zoomVisible, setZoomVisible] = useState(false);
 
@@ -243,15 +245,22 @@ const PageItem = React.memo(function PageItem({
                   the photo.
                 </Text>
               ) : (
-                <Text
+                <TextInput
+                  value={page.transcriptionText ?? ""}
+                  editable={false}
+                  multiline
+                  scrollEnabled={false}
+                  selectionColor={colors.primary + "60"}
                   style={[
                     styles.pageText,
                     { color: colors.foreground, fontFamily: "PlayfairDisplay_400Regular" },
                   ]}
                   accessibilityLabel={`Transcription of page ${index + 1}`}
-                >
-                  {page.transcriptionText ?? ""}
-                </Text>
+                  onSelectionChange={(e) => {
+                    const { start, end } = e.nativeEvent.selection;
+                    onTextSelection?.(end > start ? { start, end } : null);
+                  }}
+                />
               )}
             </ScrollView>
           )}
@@ -299,6 +308,11 @@ export default function JournalReaderScreen() {
   // ── N9: In-journal search ─────────────────────────────────────
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchText, setSearchText] = useState("");
+
+  // ── S3: Share to Feed ─────────────────────────────────────────
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+  const [textSelection, setTextSelection] = useState<{ start: number; end: number } | null>(null);
 
   // ── Correction modal state ───────────────────────────────────
   const [corrModalPageIdx, setCorrModalPageIdx] = useState<number | null>(null);
@@ -560,6 +574,7 @@ export default function JournalReaderScreen() {
       if (index !== currentPage) {
         setCurrentPage(index);
         setContentView("transcription");
+        setTextSelection(null);
       }
     },
     [currentPage, effectiveW]
@@ -738,19 +753,110 @@ export default function JournalReaderScreen() {
     );
   }, [isPrivate, journalId]);
 
-  // ── N8: Share current page ───────────────────────────────────
+  // ── N8 + S3: Share current page ──────────────────────────────
 
-  const handleShare = useCallback(async () => {
+  const handleShare = useCallback(() => {
     const page = pages[currentPage];
-    if (!page?.transcriptionText) {
-      Alert.alert("Nothing to share", "This page hasn't been transcribed yet.");
+    Alert.alert("Share", undefined, [
+      ...(page?.transcriptionText
+        ? [
+            {
+              text: "Share transcription text",
+              onPress: () =>
+                Share.share({
+                  message: page.transcriptionText!,
+                  title: `${title} — Page ${page.pageNumber}`,
+                }),
+            },
+          ]
+        : []),
+      {
+        text: "Share to Feed",
+        onPress: () => {
+          setSelectedPageIds(page ? [page.id] : []);
+          setShareModalVisible(true);
+        },
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [pages, currentPage, title]);
+
+  // ── S3: Share pages to Feed ───────────────────────────────────
+
+  const togglePageSelection = useCallback((pageId: string) => {
+    setSelectedPageIds((prev) =>
+      prev.includes(pageId)
+        ? prev.filter((id) => id !== pageId)
+        : [...prev, pageId]
+    );
+  }, []);
+
+  const handleShareToFeed = useCallback(async () => {
+    const pageId = selectedPageIds[0];
+    if (!pageId) return;
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const selectedPage = pages.find((p) => p.id === pageId);
+    const excerptText = selectedPage?.transcriptionText ?? "";
+
+    if (!excerptText.trim()) {
+      Alert.alert("Nothing to share", "This page has no transcription yet.");
       return;
     }
-    await Share.share({
-      message: page.transcriptionText,
-      title: `${title} — Page ${page.pageNumber}`,
+
+    const { error } = await supabase.from("shared_entries").insert({
+      user_id: session.user.id,
+      page_id: pageId,
+      excerpt_text: excerptText,
+      share_type: "page",
     });
-  }, [pages, currentPage, title]);
+
+    if (error) {
+      Alert.alert("Error", "Could not share. Check your connection and try again.");
+      return;
+    }
+
+    setShareModalVisible(false);
+    setSelectedPageIds([]);
+    Alert.alert("Shared!", "Your entry is now visible to your friends in their Feed.");
+  }, [pages, selectedPageIds]);
+
+  // ── S3: Share text selection snippet to Feed ──────────────────
+
+  const handleShareSelection = useCallback(async () => {
+    if (!textSelection) return;
+    const page = pages[currentPage];
+    const snippet = (page?.transcriptionText ?? "")
+      .slice(textSelection.start, textSelection.end)
+      .trim();
+    if (!snippet) return;
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session) return;
+
+    if (!page) return;
+
+    const { error } = await supabase.from("shared_entries").insert({
+      user_id: session.user.id,
+      page_id: page.id,
+      excerpt_text: snippet,
+      share_type: "snippet",
+    });
+
+    if (error) {
+      Alert.alert("Error", "Could not share. Check your connection and try again.");
+      return;
+    }
+
+    setTextSelection(null);
+    Alert.alert("Shared!", "Your snippet is now visible to your friends.");
+  }, [textSelection, pages, currentPage]);
 
   // ── N9: Search within journal ────────────────────────────────
 
@@ -817,6 +923,11 @@ export default function JournalReaderScreen() {
 
   // ── Memoized FlatList renderItem ────────────────────────────
 
+  const handleTextSelection = useCallback(
+    (sel: { start: number; end: number } | null) => setTextSelection(sel),
+    []
+  );
+
   const renderPageItem = useCallback(
     ({ item: page, index }: { item: JournalPage; index: number }) => (
       <PageItem
@@ -829,9 +940,10 @@ export default function JournalReaderScreen() {
         dimmed={matchingPageIndices !== null && !matchingPageIndices.includes(index)}
         onUpdateText={(text) => updatePageText(index, text)}
         onOpenCorrection={openCorrectionModal}
+        onTextSelection={handleTextSelection}
       />
     ),
-    [effectiveW, editMode, contentView, colors, matchingPageIndices, updatePageText, openCorrectionModal]
+    [effectiveW, editMode, contentView, colors, matchingPageIndices, updatePageText, openCorrectionModal, handleTextSelection]
   );
 
   // ── Computed values ──────────────────────────────────────────
@@ -1198,6 +1310,37 @@ export default function JournalReaderScreen() {
         />
       </View>
 
+      {/* S3: Text selection bar — share selected snippet to Feed */}
+      {textSelection && !editMode && (
+        <View
+          style={[
+            styles.selectionBar,
+            { backgroundColor: colors.card, borderTopColor: colors.border },
+          ]}
+        >
+          <TouchableOpacity
+            onPress={handleShareSelection}
+            style={styles.selectionAction}
+          >
+            <Feather name="send" size={16} color={colors.primary} />
+            <Text
+              style={[
+                styles.selectionActionText,
+                { color: colors.primary, fontFamily: "Inter_600SemiBold" },
+              ]}
+            >
+              Share snippet to Feed
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setTextSelection(null)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Feather name="x" size={18} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Footer: prev/next + dots */}
       <View
         style={[
@@ -1276,6 +1419,99 @@ export default function JournalReaderScreen() {
           <Feather name="camera" size={24} color="#fff" />
         </TouchableOpacity>
       )}
+
+      {/* ── S3: Share to Feed page picker modal ───────────── */}
+      <Modal
+        visible={shareModalVisible}
+        animationType="slide"
+        onRequestClose={() => { setShareModalVisible(false); setSelectedPageIds([]); }}
+      >
+        <View style={[styles.root, { backgroundColor: colors.background, paddingTop: pt }]}>
+          <View style={[styles.header, { paddingHorizontal: H_PAD }]}>
+            <TouchableOpacity
+              onPress={() => { setShareModalVisible(false); setSelectedPageIds([]); }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={[styles.reorderActionText, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.headerTitle, { color: colors.foreground, fontFamily: "PlayfairDisplay_600SemiBold" }]}>
+                Share to Feed
+              </Text>
+              <Text style={[styles.shareSubtitle, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                Select one page
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={handleShareToFeed}
+              disabled={selectedPageIds.length === 0}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text
+                style={[
+                  styles.reorderActionText,
+                  {
+                    color: selectedPageIds.length > 0 ? colors.primary : colors.mutedForeground,
+                    fontFamily: "Inter_600SemiBold",
+                    opacity: selectedPageIds.length > 0 ? 1 : 0.4,
+                  },
+                ]}
+              >
+                Share
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <FlatList
+            data={pages}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ paddingHorizontal: H_PAD, paddingTop: 8, paddingBottom: 40 }}
+            renderItem={({ item }) => {
+              const isSelected = selectedPageIds.includes(item.id);
+              const maxReached = !isSelected && selectedPageIds.length >= 1;
+              return (
+                <TouchableOpacity
+                  style={[
+                    styles.reorderItem,
+                    { borderBottomColor: colors.border },
+                    isSelected && { backgroundColor: colors.primary + "12" },
+                    maxReached && { opacity: 0.4 },
+                  ]}
+                  onPress={() => !maxReached && togglePageSelection(item.id)}
+                  disabled={maxReached}
+                  activeOpacity={0.7}
+                >
+                  {item.signedImageUrl ? (
+                    <Image
+                      source={{ uri: item.signedImageUrl }}
+                      style={[styles.reorderThumb, { borderColor: colors.border }]}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[styles.reorderThumb, { backgroundColor: colors.muted, borderColor: colors.border }]} />
+                  )}
+                  <View style={{ flex: 1, gap: 3 }}>
+                    <Text style={[styles.reorderPageLabel, { color: colors.foreground, fontFamily: "Inter_500Medium" }]}>
+                      Page {item.pageNumber}
+                    </Text>
+                    <Text
+                      style={[styles.shareSnippet, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}
+                      numberOfLines={2}
+                    >
+                      {item.transcriptionText ?? "No transcription"}
+                    </Text>
+                  </View>
+                  {isSelected && (
+                    <Feather name="check-circle" size={20} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      </Modal>
 
       {/* ── Reorder modal ──────────────────────────────────── */}
       <Modal
@@ -1885,6 +2121,22 @@ const styles = StyleSheet.create({
     minWidth: 20,
     textAlign: "right",
   },
+
+  // S3: Text selection bar
+  selectionBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: H_PAD,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  selectionAction: { flexDirection: "row", alignItems: "center", gap: 8 },
+  selectionActionText: { fontSize: 14 },
+
+  // S3: Share modal
+  shareSubtitle: { fontSize: 12, textAlign: "center", marginTop: 2 },
+  shareSnippet: { fontSize: 12, lineHeight: 16 },
 
   // Reorder modal
   reorderActionText: { fontSize: 15 },

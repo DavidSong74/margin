@@ -385,6 +385,7 @@ export interface Database {
         Returns: Array<{
           friend_id: string;
           friendship_id: string;
+          friend_email: string;
           since: string;
         }>;
       };
@@ -393,6 +394,7 @@ export interface Database {
         Returns: Array<{
           friendship_id: string;
           from_user_id: string;
+          from_user_email: string;
           created_at: string;
         }>;
       };
@@ -401,6 +403,7 @@ export interface Database {
         Returns: Array<{
           entry_id: string;
           user_id: string;
+          author_email: string;
           page_id: string;
           excerpt_text: string;
           share_type: string;
@@ -415,6 +418,7 @@ export interface Database {
         Returns: Array<{
           comment_id: string;
           user_id: string;
+          author_email: string;
           comment_text: string;
           created_at: string;
         }>;
