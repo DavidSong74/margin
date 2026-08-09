@@ -4,19 +4,24 @@
 
 | # | Feature | Status |
 |---|---------|--------|
-| O1 | Drop `p_user_id` from `save_correction` | 🔧 Optimization |
-| O2 | Collapse `fetchJournals` round trips | 🔧 Optimization |
-| O3 | Pass `is_private` as route param | 🔧 Optimization |
-| O4 | Guard `registerPushToken` to SIGNED_IN only | 🔧 Optimization |
+| O1 | Drop `p_user_id` from `save_correction` | ✅ Done |
+| O2 | Collapse `fetchJournals` round trips | ✅ Done |
+| O3 | Pass `is_private` as route param | ✅ Done |
+| O4 | Guard `registerPushToken` to SIGNED_IN only | ✅ Done |
 | N1 | Dark mode / theme system | 📋 To do |
-| N2 | AI transcription quality selector | 📋 To do |
-| N3 | Change password | 📋 To do |
-| N4 | Export full archive | 📋 To do |
-| N5 | Default cover color preference | 📋 To do |
-| N6 | Rate / Feedback / Help links | 📋 To do |
-| N7 | Offline capture queue | 📋 To do |
-| N8 | Share a page | 📋 To do |
-| N9 | Search within a single journal | 📋 To do |
+| N2 | AI transcription quality selector | ✅ Done |
+| N3 | Change password | ✅ Done |
+| N4 | Export full archive | ✅ Done |
+| N5 | Default cover color preference | ✅ Done |
+| N6 | Rate / Feedback / Help links | ✅ Done |
+| N7 | Offline capture queue | ✅ Done |
+| N8 | Share a page | ✅ Done |
+| N9 | Search within a single journal | ✅ Done |
+| S1 | Social: data model (SQL) | ✅ Done — run `011_social.sql` in Supabase SQL Editor |
+| S2 | Social: inbox overlay + friend search | 📋 To do |
+| S3 | Social: share from journal reader | 📋 To do |
+| S4 | Social: Feed tab | 📋 To do |
+| S5 | Social: likes + comments | 📋 To do |
 | D1 | iCloud backup | ⏸ Defer |
 | D2 | Google Drive backup | ⏸ Defer |
 | D3 | Home screen widget | ⏸ Defer |
@@ -824,3 +829,967 @@ A "On this day" or daily quote widget would pair well with the existing push not
 infrastructure. Deferred because it requires a native Widget Extension target (iOS 16+),
 which is outside what Expo managed workflow supports without bare ejection or a custom dev
 client. Revisit when the app has a stable build pipeline and native dev capacity.
+
+---
+
+## Social features (S1–S5)
+
+> **Prerequisite order:** S1 must be done first (SQL). S2, S3, S4 can be done in parallel after S1. S5 depends on S4.
+
+---
+
+### S1. Data model — run all SQL in Supabase SQL Editor
+
+Create a new migration file `supabase/migrations/010_social.sql` with all of the following, then run it in the Supabase SQL Editor.
+
+```sql
+-- ── User profiles (public, searchable by email) ──────────────────────────────
+-- Supabase auth.users is not directly queryable from the client.
+-- This view exposes only the safe fields we need for friend search.
+CREATE OR REPLACE VIEW public.user_email_lookup AS
+  SELECT id AS user_id, email
+  FROM auth.users;
+
+-- RLS: any authenticated user can query (email is already semi-public in this context)
+ALTER VIEW public.user_email_lookup OWNER TO authenticated;
+
+-- RPC to search by email — SECURITY DEFINER so it can read auth.users safely
+CREATE OR REPLACE FUNCTION public.find_user_by_email(p_email text)
+RETURNS TABLE (user_id uuid, email text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+  SELECT id AS user_id, email
+  FROM auth.users
+  WHERE lower(email) = lower(p_email)
+    AND id <> auth.uid()   -- can't friend yourself
+  LIMIT 1;
+$$;
+
+-- ── Friendships ───────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.friendships (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  requester_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  addressee_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  status       text NOT NULL DEFAULT 'pending'  -- 'pending' | 'accepted' | 'declined'
+                CHECK (status IN ('pending', 'accepted', 'declined')),
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (requester_id, addressee_id)
+);
+
+ALTER TABLE public.friendships ENABLE ROW LEVEL SECURITY;
+
+-- Each user sees requests they sent or received
+CREATE POLICY "friendships: select own" ON public.friendships
+  FOR SELECT USING (auth.uid() = requester_id OR auth.uid() = addressee_id);
+
+CREATE POLICY "friendships: insert as requester" ON public.friendships
+  FOR INSERT WITH CHECK (auth.uid() = requester_id);
+
+-- Only addressee can update (accept/decline)
+CREATE POLICY "friendships: update as addressee" ON public.friendships
+  FOR UPDATE USING (auth.uid() = addressee_id);
+
+-- Either party can delete (unfriend)
+CREATE POLICY "friendships: delete own" ON public.friendships
+  FOR DELETE USING (auth.uid() = requester_id OR auth.uid() = addressee_id);
+
+-- RPC: returns mutual friends (both sides accepted)
+CREATE OR REPLACE FUNCTION public.get_friends()
+RETURNS TABLE (friend_id uuid, friend_email text)
+LANGUAGE sql
+SECURITY INVOKER
+SET search_path = public, auth
+AS $$
+  SELECT
+    CASE WHEN f.requester_id = auth.uid() THEN f.addressee_id ELSE f.requester_id END AS friend_id,
+    u.email AS friend_email
+  FROM friendships f
+  JOIN auth.users u ON u.id = CASE WHEN f.requester_id = auth.uid() THEN f.addressee_id ELSE f.requester_id END
+  WHERE (f.requester_id = auth.uid() OR f.addressee_id = auth.uid())
+    AND f.status = 'accepted';
+$$;
+
+-- RPC: pending incoming requests
+CREATE OR REPLACE FUNCTION public.get_pending_friend_requests()
+RETURNS TABLE (friendship_id uuid, requester_id uuid, requester_email text, created_at timestamptz)
+LANGUAGE sql
+SECURITY INVOKER
+SET search_path = public, auth
+AS $$
+  SELECT f.id, f.requester_id, u.email, f.created_at
+  FROM friendships f
+  JOIN auth.users u ON u.id = f.requester_id
+  WHERE f.addressee_id = auth.uid()
+    AND f.status = 'pending'
+  ORDER BY f.created_at DESC;
+$$;
+
+-- ── Notifications ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  type       text NOT NULL,   -- 'friend_request' | 'friend_accepted' | 'on_this_day'
+  data       jsonb NOT NULL DEFAULT '{}',
+  read       boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "notifications: own" ON public.notifications
+  FOR ALL USING (auth.uid() = user_id);
+
+-- Trigger: create a notification when a friend request is sent
+CREATE OR REPLACE FUNCTION public.notify_friend_request()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  INSERT INTO public.notifications (user_id, type, data)
+    VALUES (
+      NEW.addressee_id,
+      'friend_request',
+      jsonb_build_object('friendship_id', NEW.id, 'requester_id', NEW.requester_id)
+    );
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_notify_friend_request
+AFTER INSERT ON public.friendships
+FOR EACH ROW WHEN (NEW.status = 'pending')
+EXECUTE FUNCTION public.notify_friend_request();
+
+-- Trigger: notify when a request is accepted
+CREATE OR REPLACE FUNCTION public.notify_friend_accepted()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  IF NEW.status = 'accepted' AND OLD.status = 'pending' THEN
+    INSERT INTO public.notifications (user_id, type, data)
+      VALUES (
+        NEW.requester_id,
+        'friend_accepted',
+        jsonb_build_object('friendship_id', NEW.id, 'addressee_id', NEW.addressee_id)
+      );
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_notify_friend_accepted
+AFTER UPDATE ON public.friendships
+FOR EACH ROW EXECUTE FUNCTION public.notify_friend_accepted();
+
+-- ── Shared entries (what appears in the Feed) ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.shared_entries (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  -- page_ids stores the 1-5 pages included in this share (may be empty if sharing a text snippet only)
+  page_ids    uuid[] NOT NULL DEFAULT '{}',
+  -- shared_text is the exact text visible in the feed (either selected snippet or full page transcriptions joined)
+  shared_text text NOT NULL,
+  -- original journal context for display
+  journal_id  uuid REFERENCES public.journals(id) ON DELETE SET NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.shared_entries ENABLE ROW LEVEL SECURITY;
+
+-- Author can manage their own shares
+CREATE POLICY "shared_entries: author" ON public.shared_entries
+  FOR ALL USING (auth.uid() = user_id);
+
+-- Mutual friends can read
+CREATE POLICY "shared_entries: friends can read" ON public.shared_entries
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM public.friendships f
+      WHERE f.status = 'accepted'
+        AND (
+          (f.requester_id = auth.uid() AND f.addressee_id = shared_entries.user_id) OR
+          (f.addressee_id = auth.uid() AND f.requester_id = shared_entries.user_id)
+        )
+    )
+  );
+
+-- RPC: feed for current user (shared entries from mutual friends, newest first)
+CREATE OR REPLACE FUNCTION public.get_feed()
+RETURNS TABLE (
+  entry_id    uuid,
+  author_id   uuid,
+  author_email text,
+  shared_text text,
+  journal_id  uuid,
+  created_at  timestamptz,
+  like_count  bigint,
+  comment_count bigint,
+  viewer_liked  boolean
+)
+LANGUAGE sql
+SECURITY INVOKER
+SET search_path = public, auth
+AS $$
+  SELECT
+    se.id,
+    se.user_id,
+    u.email,
+    se.shared_text,
+    se.journal_id,
+    se.created_at,
+    COUNT(DISTINCT fl.id) AS like_count,
+    COUNT(DISTINCT fc.id) AS comment_count,
+    EXISTS (SELECT 1 FROM feed_likes fl2 WHERE fl2.shared_entry_id = se.id AND fl2.user_id = auth.uid()) AS viewer_liked
+  FROM shared_entries se
+  JOIN auth.users u ON u.id = se.user_id
+  LEFT JOIN feed_likes fl ON fl.shared_entry_id = se.id
+  LEFT JOIN feed_comments fc ON fc.shared_entry_id = se.id
+  WHERE EXISTS (
+    SELECT 1 FROM friendships f
+    WHERE f.status = 'accepted'
+      AND (
+        (f.requester_id = auth.uid() AND f.addressee_id = se.user_id) OR
+        (f.addressee_id = auth.uid() AND f.requester_id = se.user_id)
+      )
+  )
+  GROUP BY se.id, se.user_id, u.email, se.shared_text, se.journal_id, se.created_at
+  ORDER BY se.created_at DESC
+  LIMIT 50;
+$$;
+
+-- ── Feed likes ────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.feed_likes (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  shared_entry_id uuid NOT NULL REFERENCES public.shared_entries(id) ON DELETE CASCADE,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, shared_entry_id)
+);
+
+ALTER TABLE public.feed_likes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "feed_likes: own" ON public.feed_likes
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "feed_likes: friends can read" ON public.feed_likes
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM shared_entries se
+      JOIN friendships f ON f.status = 'accepted'
+        AND ((f.requester_id = auth.uid() AND f.addressee_id = se.user_id) OR
+             (f.addressee_id = auth.uid() AND f.requester_id = se.user_id))
+      WHERE se.id = feed_likes.shared_entry_id
+    )
+  );
+
+-- ── Feed comments ─────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.feed_comments (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  shared_entry_id uuid NOT NULL REFERENCES public.shared_entries(id) ON DELETE CASCADE,
+  text            text NOT NULL CHECK (char_length(text) > 0 AND char_length(text) <= 500),
+  created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.feed_comments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "feed_comments: own" ON public.feed_comments
+  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "feed_comments: friends can read" ON public.feed_comments
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM shared_entries se
+      JOIN friendships f ON f.status = 'accepted'
+        AND ((f.requester_id = auth.uid() AND f.addressee_id = se.user_id) OR
+             (f.addressee_id = auth.uid() AND f.requester_id = se.user_id))
+      WHERE se.id = feed_comments.shared_entry_id
+    )
+  );
+
+-- RPC: get comments for a single shared entry (caller must be a mutual friend of the author)
+CREATE OR REPLACE FUNCTION public.get_comments(p_entry_id uuid)
+RETURNS TABLE (comment_id uuid, user_id uuid, author_email text, text text, created_at timestamptz)
+LANGUAGE sql
+SECURITY INVOKER
+SET search_path = public, auth
+AS $$
+  SELECT fc.id, fc.user_id, u.email, fc.text, fc.created_at
+  FROM feed_comments fc
+  JOIN auth.users u ON u.id = fc.user_id
+  WHERE fc.shared_entry_id = p_entry_id
+  ORDER BY fc.created_at ASC;
+$$;
+```
+
+Add the new types to `lib/database.types.ts`:
+
+```ts
+friendships: { Row: { id: string; requester_id: string; addressee_id: string; status: "pending"|"accepted"|"declined"; created_at: string }; Insert: { requester_id: string; addressee_id: string; status?: string }; Update: { status?: string }; Relationships: [] };
+notifications: { Row: { id: string; user_id: string; type: string; data: Json; read: boolean; created_at: string }; Insert: { user_id: string; type: string; data?: Json }; Update: { read?: boolean }; Relationships: [] };
+shared_entries: { Row: { id: string; user_id: string; page_ids: string[]; shared_text: string; journal_id: string|null; created_at: string }; Insert: { user_id: string; page_ids?: string[]; shared_text: string; journal_id?: string|null }; Update: Partial<...>; Relationships: [] };
+feed_likes: { Row: { id: string; user_id: string; shared_entry_id: string; created_at: string }; Insert: { user_id: string; shared_entry_id: string }; Update: {}; Relationships: [] };
+feed_comments: { Row: { id: string; user_id: string; shared_entry_id: string; text: string; created_at: string }; Insert: { user_id: string; shared_entry_id: string; text: string }; Update: {}; Relationships: [] };
+```
+
+Also add the new RPCs:
+```ts
+find_user_by_email: { Args: { p_email: string }; Returns: Array<{ user_id: string; email: string }> };
+get_friends: { Args: Record<string,never>; Returns: Array<{ friend_id: string; friend_email: string }> };
+get_pending_friend_requests: { Args: Record<string,never>; Returns: Array<{ friendship_id: string; requester_id: string; requester_email: string; created_at: string }> };
+get_feed: { Args: Record<string,never>; Returns: Array<{ entry_id: string; author_id: string; author_email: string; shared_text: string; journal_id: string|null; created_at: string; like_count: number; comment_count: number; viewer_liked: boolean }> };
+get_comments: { Args: { p_entry_id: string }; Returns: Array<{ comment_id: string; user_id: string; author_email: string; text: string; created_at: string }> };
+```
+
+---
+
+### S2. Inbox overlay + friend search
+
+**New file:** `artifacts/margin/components/InboxOverlay.tsx`
+
+**Modified file:** `artifacts/margin/app/(tabs)/index.tsx` — add inbox button to header
+
+---
+
+#### Step 1 — Add the inbox button to the Library header
+
+In `index.tsx`, find the existing header section and add a `TouchableOpacity` wrapping the "M" logo in the top-right. Add `inboxVisible` state and an unread count:
+
+```tsx
+const [inboxVisible, setInboxVisible] = useState(false);
+const [unreadCount, setUnreadCount] = useState(0);
+
+// In the header JSX, replace or wrap the existing "M" icon:
+<TouchableOpacity onPress={() => setInboxVisible(true)} style={styles.inboxBtn}>
+  <Text style={[styles.logoM, { color: colors.primary }]}>M</Text>
+  {unreadCount > 0 && (
+    <View style={[styles.badge, { backgroundColor: colors.destructive }]}>
+      <Text style={styles.badgeText}>{unreadCount > 9 ? "9+" : String(unreadCount)}</Text>
+    </View>
+  )}
+</TouchableOpacity>
+
+// Add to StyleSheet:
+inboxBtn: { position: "relative" },
+logoM: { fontSize: 22, fontFamily: "PlayfairDisplay_700Bold" },
+badge: { position: "absolute", top: -4, right: -6, minWidth: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center", paddingHorizontal: 3 },
+badgeText: { color: "#fff", fontSize: 10, fontFamily: "Inter_700Bold" },
+```
+
+Fetch unread count on mount and on focus:
+
+```tsx
+const fetchUnreadCount = useCallback(async () => {
+  const { count } = await supabase
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("read", false);
+  setUnreadCount(count ?? 0);
+}, []);
+
+useFocusEffect(useCallback(() => { fetchUnreadCount(); }, [fetchUnreadCount]));
+```
+
+Pass `inboxVisible`, `setInboxVisible`, and `onNotificationsRead` (callback to re-fetch count) as props to `<InboxOverlay>`.
+
+---
+
+#### Step 2 — Build InboxOverlay component
+
+Create `artifacts/margin/components/InboxOverlay.tsx`. This is a `Modal` with `transparent={true}` that slides in from the top-right without navigating away from the Library screen.
+
+**State it manages:**
+- `searchEmail: string` — the email being typed in the search field
+- `searchResult: { user_id: string; email: string } | null | "not_found"` — result of email lookup
+- `pendingRequests: Array<{ friendship_id, requester_id, requester_email, created_at }>`
+- `notifications: Array<{ id, type, data, read, created_at }>`
+- `friends: Array<{ friend_id, friend_email }>`
+- `loading: boolean`
+
+**Layout:**
+
+```tsx
+<Modal
+  visible={visible}
+  transparent
+  animationType="fade"
+  onRequestClose={onClose}
+>
+  {/* Backdrop — tapping outside closes */}
+  <Pressable style={styles.backdrop} onPress={onClose} />
+
+  {/* Panel — anchored top-right, full height of screen */}
+  <View style={[styles.panel, { backgroundColor: colors.card }]}>
+    {/* Header */}
+    <View style={styles.panelHeader}>
+      <Text style={styles.panelTitle}>Inbox</Text>
+      <TouchableOpacity onPress={onClose}><Feather name="x" size={20} /></TouchableOpacity>
+    </View>
+
+    {/* Friend search */}
+    <View style={styles.searchSection}>
+      <Text style={styles.sectionLabel}>Add a friend</Text>
+      <TextInput
+        placeholder="Search by email"
+        value={searchEmail}
+        onChangeText={setSearchEmail}
+        autoCapitalize="none"
+        keyboardType="email-address"
+        returnKeyType="search"
+        onSubmitEditing={handleSearch}
+        style={styles.searchInput}
+      />
+      {/* Show result and "Add friend" button */}
+      {searchResult === "not_found" && <Text>No user found.</Text>}
+      {searchResult && searchResult !== "not_found" && (
+        <View style={styles.searchResult}>
+          <Text>{searchResult.email}</Text>
+          <TouchableOpacity onPress={() => handleSendRequest(searchResult.user_id)}>
+            <Text>Add friend</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+
+    {/* Friends list */}
+    <Text style={styles.sectionLabel}>Friends ({friends.length})</Text>
+    {friends.map((f) => (
+      <View key={f.friend_id} style={styles.friendRow}>
+        <Text>{f.friend_email}</Text>
+      </View>
+    ))}
+
+    {/* Pending requests + notifications */}
+    <Text style={styles.sectionLabel}>Notifications</Text>
+    <FlatList
+      data={allNotifications}
+      keyExtractor={(item) => item.id}
+      renderItem={({ item }) => <NotificationRow item={item} onAccept={handleAccept} onDecline={handleDecline} />}
+    />
+  </View>
+</Modal>
+```
+
+**StyleSheet for the panel:**
+```tsx
+backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.4)" },
+panel: { position: "absolute", top: 0, right: 0, width: "80%", maxWidth: 340, height: "100%", padding: 20, paddingTop: 60, shadowColor: "#000", shadowOpacity: 0.15, shadowRadius: 20 },
+```
+
+**Key handlers:**
+
+```tsx
+async function handleSearch() {
+  if (!searchEmail.trim()) return;
+  const { data } = await supabase.rpc("find_user_by_email", { p_email: searchEmail.trim() });
+  setSearchResult(data?.length ? data[0] : "not_found");
+}
+
+async function handleSendRequest(addresseeId: string) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return;
+  await supabase.from("friendships").insert({ requester_id: session.user.id, addressee_id: addresseeId });
+  setSearchResult(null);
+  setSearchEmail("");
+  Alert.alert("Request sent!");
+}
+
+async function handleAccept(friendshipId: string) {
+  await supabase.from("friendships").update({ status: "accepted" }).eq("id", friendshipId);
+  await supabase.from("notifications").update({ read: true })
+    .eq("type", "friend_request")
+    .contains("data", { friendship_id: friendshipId });
+  fetchAll(); // re-fetch state
+  onNotificationsRead();
+}
+
+async function handleDecline(friendshipId: string) {
+  await supabase.from("friendships").update({ status: "declined" }).eq("id", friendshipId);
+  fetchAll();
+}
+```
+
+Mark all notifications as read when the overlay opens:
+```tsx
+useEffect(() => {
+  if (visible) {
+    fetchAll();
+    supabase.from("notifications").update({ read: true }).eq("read", false).then(() => {
+      onNotificationsRead(); // clears the red badge
+    });
+  }
+}, [visible]);
+```
+
+**NotificationRow subcomponent** renders differently based on `item.type`:
+- `friend_request`: shows requester email + Accept / Decline buttons
+- `friend_accepted`: shows "X accepted your friend request"
+- `on_this_day`: shows the notification message text from `item.data.message`
+
+---
+
+### S3. Share from journal reader
+
+**Modified file:** `artifacts/margin/app/journal/[id].tsx`
+
+Two separate share paths — implement both:
+
+---
+
+#### Path A: Share button (page picker)
+
+Add a `Share` button to the header, to the left of the existing `Edit` toggle (and the `Retry` button). Only visible when `!editMode`.
+
+```tsx
+// New state:
+const [shareMode, setShareMode] = useState(false);
+const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+const [shareModalVisible, setShareModalVisible] = useState(false);
+```
+
+When the user taps `Share`, open a modal (`shareModalVisible = true`) showing all pages as a scrollable list of thumbnails. Each thumbnail has a checkbox. The user selects 1–5 pages.
+
+```tsx
+// Share modal JSX (similar structure to existing reorder modal)
+<Modal visible={shareModalVisible} animationType="slide">
+  <View style={styles.reorderRoot}>
+    <View style={styles.reorderHeader}>
+      <Text style={styles.reorderTitle}>Select pages to share</Text>
+      <Text style={styles.reorderSubtitle}>{selectedPageIds.length}/5 selected</Text>
+    </View>
+    <FlatList
+      data={pages}
+      keyExtractor={(p) => p.id}
+      renderItem={({ item }) => (
+        <TouchableOpacity
+          style={[styles.sharePageRow, selectedPageIds.includes(item.id) && styles.sharePageSelected]}
+          onPress={() => togglePageSelection(item.id)}
+          disabled={!selectedPageIds.includes(item.id) && selectedPageIds.length >= 5}
+        >
+          <Image source={{ uri: getThumbnailUrl(item.thumbnailPath) }} style={styles.reorderThumb} />
+          <Text style={styles.reorderPageLabel}>Page {item.pageNumber}</Text>
+          <Text numberOfLines={2} style={styles.shareSnippet}>{item.transcriptionText ?? "No transcription"}</Text>
+          {selectedPageIds.includes(item.id) && <Feather name="check-circle" size={20} color={colors.primary} />}
+        </TouchableOpacity>
+      )}
+    />
+    <View style={styles.shareActions}>
+      <TouchableOpacity onPress={() => setShareModalVisible(false)} style={styles.reorderCancel}>
+        <Text>Cancel</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={handleSharePages}
+        disabled={selectedPageIds.length === 0}
+        style={[styles.reorderSave, { opacity: selectedPageIds.length === 0 ? 0.4 : 1 }]}
+      >
+        <Text style={styles.reorderActionText}>Share to Feed</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
+```
+
+```tsx
+function togglePageSelection(pageId: string) {
+  setSelectedPageIds((prev) =>
+    prev.includes(pageId) ? prev.filter((id) => id !== pageId) : [...prev, pageId]
+  );
+}
+
+async function handleSharePages() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return;
+  const selectedPages = pages.filter((p) => selectedPageIds.includes(p.id));
+  const sharedText = selectedPages
+    .sort((a, b) => a.pageNumber - b.pageNumber)
+    .map((p) => p.transcriptionText ?? "")
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+
+  if (!sharedText.trim()) {
+    Alert.alert("Nothing to share", "Selected pages have no transcription yet.");
+    return;
+  }
+
+  await supabase.from("shared_entries").insert({
+    user_id: session.user.id,
+    page_ids: selectedPageIds,
+    shared_text: sharedText,
+    journal_id: journalId,
+  });
+
+  setShareModalVisible(false);
+  setSelectedPageIds([]);
+  Alert.alert("Shared!", "Your entry is now visible to your friends in their Feed.");
+}
+```
+
+---
+
+#### Path B: Text selection → Share snippet
+
+The transcription text in the reader is currently rendered in a plain `Text` component. To support text selection with a "Share" action, switch the transcription display to a `TextInput` in read-only mode:
+
+```tsx
+// Replace the transcription Text component with:
+<TextInput
+  value={pages[currentPage]?.transcriptionText ?? ""}
+  editable={false}
+  multiline
+  scrollEnabled={false}
+  selectionColor={colors.primary + "60"}
+  style={[styles.transcriptionText, { color: colors.foreground }]}
+  onSelectionChange={(e) => {
+    const { start, end } = e.nativeEvent.selection;
+    if (end > start) setTextSelection({ start, end });
+    else setTextSelection(null);
+  }}
+/>
+```
+
+Add state: `const [textSelection, setTextSelection] = useState<{ start: number; end: number } | null>(null);`
+
+When `textSelection` is non-null, show a floating action bar above the keyboard:
+
+```tsx
+{textSelection && (
+  <View style={[styles.selectionBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <TouchableOpacity onPress={handleShareSelection} style={styles.selectionAction}>
+      <Feather name="share" size={16} color={colors.primary} />
+      <Text style={[styles.selectionActionText, { color: colors.primary }]}>Share to Feed</Text>
+    </TouchableOpacity>
+    <TouchableOpacity onPress={() => setTextSelection(null)} style={styles.selectionAction}>
+      <Feather name="x" size={16} color={colors.mutedForeground} />
+    </TouchableOpacity>
+  </View>
+)}
+```
+
+```tsx
+async function handleShareSelection() {
+  if (!textSelection) return;
+  const page = pages[currentPage];
+  const fullText = page?.transcriptionText ?? "";
+  const snippet = fullText.slice(textSelection.start, textSelection.end).trim();
+  if (!snippet) return;
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return;
+
+  await supabase.from("shared_entries").insert({
+    user_id: session.user.id,
+    page_ids: [page.id],
+    shared_text: snippet,
+    journal_id: journalId,
+  });
+
+  setTextSelection(null);
+  Alert.alert("Shared!", "Your snippet is now visible to your friends.");
+}
+```
+
+Add styles: `selectionBar` (flexDirection row, position absolute, bottom above keyboard, left 0, right 0, padding 12, borderTopWidth 1, gap 16), `selectionAction` (flexDirection row, alignItems center, gap 6), `selectionActionText` (fontSize 14, fontFamily Inter_600SemiBold).
+
+**Watch out for:** On iOS, switching from a `Text` to `TextInput editable={false}` changes scroll behavior — the transcription is inside a `ScrollView` and `TextInput` nested in `ScrollView` can fight for scroll events. Fix by setting `scrollEnabled={false}` on the `TextInput` and keeping the outer scroll intact.
+
+---
+
+### S4. Feed tab
+
+**New file:** `artifacts/margin/app/(tabs)/feed.tsx`
+
+**Modified file:** `artifacts/margin/app/(tabs)/_layout.tsx` — add Feed tab
+
+---
+
+#### Step 1 — Add the tab in `_layout.tsx`
+
+```tsx
+<Tabs.Screen
+  name="feed"
+  options={{
+    title: "Feed",
+    tabBarIcon: ({ color }) => <Feather name="users" size={22} color={color} />,
+  }}
+/>
+```
+
+> **Important:** The bottom tab bar currently has 4 tabs. Adding a 5th narrows each tab. Test
+> on a small screen (iPhone SE) to confirm nothing clips. If it's crowded, replace the tab labels
+> with icons-only by setting `tabBarShowLabel: false` globally in the tab bar options.
+
+---
+
+#### Step 2 — Build `feed.tsx`
+
+**State:**
+```tsx
+type FeedEntry = {
+  entry_id: string;
+  author_id: string;
+  author_email: string;
+  shared_text: string;
+  journal_id: string | null;
+  created_at: string;
+  like_count: number;
+  comment_count: number;
+  viewer_liked: boolean;
+};
+
+const [entries, setEntries] = useState<FeedEntry[]>([]);
+const [loading, setLoading] = useState(true);
+const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+const [commentEntryId, setCommentEntryId] = useState<string | null>(null);
+```
+
+**Fetch on focus:**
+```tsx
+useFocusEffect(useCallback(() => {
+  supabase.rpc("get_feed").then(({ data }) => {
+    setEntries(data ?? []);
+    setLoading(false);
+  });
+}, []));
+```
+
+**FeedCard component** (memoize with `React.memo`):
+
+```tsx
+interface FeedCardProps {
+  entry: FeedEntry;
+  colors: ReturnType<typeof useColors>;
+  isExpanded: boolean;
+  onToggleExpand: (id: string) => void;
+  onLike: (id: string) => void;
+  onOpenComments: (id: string) => void;
+}
+
+const FeedCard = React.memo(function FeedCard({ entry, colors, isExpanded, onToggleExpand, onLike, onOpenComments }: FeedCardProps) {
+  const TEXT_LINE_LIMIT = 10;
+  const lines = entry.shared_text.split("\n");
+  const isTruncated = lines.length > TEXT_LINE_LIMIT;
+  const displayText = isExpanded || !isTruncated
+    ? entry.shared_text
+    : lines.slice(0, TEXT_LINE_LIMIT).join("\n") + "…";
+  const dateStr = new Date(entry.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+  return (
+    <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      {/* Author + date */}
+      <View style={styles.cardHeader}>
+        <Text style={[styles.authorEmail, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}>
+          {entry.author_email}
+        </Text>
+        <Text style={[styles.cardDate, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+          {dateStr}
+        </Text>
+      </View>
+
+      {/* Transcription text */}
+      <TouchableOpacity onPress={() => isTruncated && onToggleExpand(entry.entry_id)} activeOpacity={isTruncated ? 0.7 : 1}>
+        <Text style={[styles.entryText, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
+          {displayText}
+        </Text>
+        {isTruncated && !isExpanded && (
+          <Text style={[styles.showMore, { color: colors.primary, fontFamily: "Inter_600SemiBold" }]}>
+            Show more
+          </Text>
+        )}
+        {isExpanded && isTruncated && (
+          <Text style={[styles.showMore, { color: colors.primary, fontFamily: "Inter_600SemiBold" }]}>
+            Show less
+          </Text>
+        )}
+      </TouchableOpacity>
+
+      {/* Actions row */}
+      <View style={styles.cardActions}>
+        <TouchableOpacity onPress={() => onLike(entry.entry_id)} style={styles.actionBtn}>
+          <Feather
+            name="heart"
+            size={18}
+            color={entry.viewer_liked ? colors.destructive : colors.mutedForeground}
+          />
+          {entry.like_count > 0 && (
+            <Text style={[styles.actionCount, { color: colors.mutedForeground }]}>{entry.like_count}</Text>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => onOpenComments(entry.entry_id)} style={styles.actionBtn}>
+          <Feather name="message-circle" size={18} color={colors.mutedForeground} />
+          {entry.comment_count > 0 && (
+            <Text style={[styles.actionCount, { color: colors.mutedForeground }]}>{entry.comment_count}</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+});
+```
+
+**Like handler** (optimistic update):
+```tsx
+const handleLike = useCallback(async (entryId: string) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return;
+  const entry = entries.find((e) => e.entry_id === entryId);
+  if (!entry) return;
+
+  if (entry.viewer_liked) {
+    // Unlike
+    setEntries((prev) => prev.map((e) => e.entry_id === entryId
+      ? { ...e, viewer_liked: false, like_count: e.like_count - 1 } : e));
+    await supabase.from("feed_likes")
+      .delete().eq("shared_entry_id", entryId).eq("user_id", session.user.id);
+  } else {
+    // Like
+    setEntries((prev) => prev.map((e) => e.entry_id === entryId
+      ? { ...e, viewer_liked: true, like_count: e.like_count + 1 } : e));
+    await supabase.from("feed_likes")
+      .insert({ user_id: session.user.id, shared_entry_id: entryId });
+  }
+}, [entries]);
+```
+
+**Screen JSX:**
+```tsx
+return (
+  <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+      <Text style={[styles.title, { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" }]}>
+        Feed
+      </Text>
+    </View>
+
+    {loading ? (
+      <ActivityIndicator style={{ marginTop: 48 }} color={colors.primary} />
+    ) : entries.length === 0 ? (
+      <View style={styles.empty}>
+        <Feather name="users" size={40} color={colors.mutedForeground} />
+        <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Nothing here yet</Text>
+        <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>
+          Add friends from the inbox (tap M in the Library) and ask them to share a journal entry.
+        </Text>
+      </View>
+    ) : (
+      <FlatList
+        data={entries}
+        keyExtractor={(e) => e.entry_id}
+        renderItem={({ item }) => (
+          <FeedCard
+            entry={item}
+            colors={colors}
+            isExpanded={expandedIds.has(item.entry_id)}
+            onToggleExpand={(id) => setExpandedIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; })}
+            onLike={handleLike}
+            onOpenComments={setCommentEntryId}
+          />
+        )}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 80 }}
+      />
+    )}
+
+    {/* Comments bottom sheet — see S5 */}
+    <CommentsSheet entryId={commentEntryId} onClose={() => setCommentEntryId(null)} />
+  </View>
+);
+```
+
+**Styles to add:** `root` (flex 1), `header` (paddingHorizontal 20, paddingBottom 12), `title` (fontSize 24), `empty` (flex 1, alignItems center, justifyContent center, padding 40, gap 12), `emptyTitle` (fontSize 20, fontFamily PlayfairDisplay_600SemiBold), `emptyBody` (fontSize 14, textAlign center, lineHeight 20), `card` (borderRadius 14, borderWidth 1, padding 16, gap 10), `cardHeader` (flexDirection row, justifyContent space-between, alignItems flex-start), `authorEmail` (fontSize 14, flex 1), `cardDate` (fontSize 12), `entryText` (fontSize 15, lineHeight 24), `showMore` (fontSize 13, marginTop 4), `cardActions` (flexDirection row, gap 20, marginTop 4), `actionBtn` (flexDirection row, alignItems center, gap 5), `actionCount` (fontSize 13).
+
+---
+
+### S5. Comments bottom sheet
+
+**New component:** `artifacts/margin/components/CommentsSheet.tsx`
+
+This is a `Modal` (or a `BottomSheet` from `@gorhom/bottom-sheet` if that library is installed) that slides up from the bottom when the comment icon is tapped.
+
+```tsx
+interface CommentsSheetProps {
+  entryId: string | null;  // null = closed
+  onClose: () => void;
+}
+```
+
+**State:** `comments: Comment[]`, `newText: string`, `sending: boolean`
+
+**Fetch comments on open:**
+```tsx
+useEffect(() => {
+  if (!entryId) return;
+  supabase.rpc("get_comments", { p_entry_id: entryId }).then(({ data }) => setComments(data ?? []));
+}, [entryId]);
+```
+
+**Post a comment:**
+```tsx
+async function handleSend() {
+  if (!newText.trim() || !entryId) return;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return;
+  setSending(true);
+  const { data } = await supabase
+    .from("feed_comments")
+    .insert({ user_id: session.user.id, shared_entry_id: entryId, text: newText.trim() })
+    .select()
+    .single();
+  if (data) {
+    setComments((prev) => [...prev, { ...data, author_email: session.user.email! }]);
+  }
+  setNewText("");
+  setSending(false);
+}
+```
+
+**Layout:**
+```tsx
+<Modal visible={!!entryId} transparent animationType="slide" onRequestClose={onClose}>
+  <Pressable style={styles.backdrop} onPress={onClose} />
+  <View style={[styles.sheet, { backgroundColor: colors.card }]}>
+    <View style={styles.sheetHandle} />
+    <Text style={styles.sheetTitle}>Comments</Text>
+    <FlatList
+      data={comments}
+      keyExtractor={(c) => c.comment_id}
+      renderItem={({ item }) => (
+        <View style={styles.commentRow}>
+          <Text style={[styles.commentAuthor, { color: colors.primary }]}>{item.author_email}</Text>
+          <Text style={[styles.commentText, { color: colors.foreground }]}>{item.text}</Text>
+        </View>
+      )}
+      ListEmptyComponent={<Text style={{ color: colors.mutedForeground, textAlign: "center", marginTop: 16 }}>No comments yet.</Text>}
+    />
+    {/* Input row */}
+    <View style={[styles.inputRow, { borderTopColor: colors.border }]}>
+      <TextInput
+        value={newText}
+        onChangeText={setNewText}
+        placeholder="Add a comment…"
+        placeholderTextColor={colors.mutedForeground}
+        style={[styles.commentInput, { color: colors.foreground }]}
+        maxLength={500}
+        returnKeyType="send"
+        onSubmitEditing={handleSend}
+      />
+      {sending
+        ? <ActivityIndicator size="small" color={colors.primary} />
+        : <TouchableOpacity onPress={handleSend} disabled={!newText.trim()}>
+            <Feather name="send" size={20} color={newText.trim() ? colors.primary : colors.mutedForeground} />
+          </TouchableOpacity>
+      }
+    </View>
+  </View>
+</Modal>
+```
+
+**Styles:** `backdrop` (flex 1, backgroundColor rgba(0,0,0,0.4)), `sheet` (position absolute, bottom 0, left 0, right 0, height "60%", borderTopLeftRadius 20, borderTopRightRadius 20, padding 16, gap 8), `sheetHandle` (alignSelf center, width 40, height 4, borderRadius 2, backgroundColor border), `sheetTitle` (fontSize 17, fontFamily Inter_600SemiBold), `commentRow` (gap 2, paddingVertical 8), `commentAuthor` (fontSize 12, fontFamily Inter_600SemiBold), `commentText` (fontSize 14, lineHeight 20), `inputRow` (flexDirection row, alignItems center, gap 10, borderTopWidth StyleSheet.hairlineWidth, paddingTop 10), `commentInput` (flex 1, fontSize 15).
+
+---
+
+### Watch out for (social features overall)
+
+- **Email search privacy:** `find_user_by_email` is `SECURITY DEFINER` and returns any email that matches. This is intentional (users must know the exact email) but means users can verify whether any email has a Margin account. Accept this tradeoff for v1; rate-limit the RPC in the Edge Function if abuse becomes a concern.
+
+- **Feed RLS:** The `shared_entries` "friends can read" policy uses a correlated subquery that runs per-row. On large datasets this is slow. For v1 with small friend lists this is fine. At scale, denormalize with a `friendship_cache` table or use Postgres row-level caching.
+
+- **Deleting a share:** Add a long-press action on your own feed cards (visible only to the author) that calls `supabase.from("shared_entries").delete().eq("id", entryId)`. Not yet implemented — add as a follow-up.
+
+- **`TextInput editable={false}` scroll conflict:** On Android, `TextInput` inside `ScrollView` steals vertical scroll events. Wrap the `TextInput` in a `View` with `pointerEvents="box-none"` on Android (`Platform.OS === "android"`) and test scrolling through long transcriptions.
+
+- **5th tab bar icon:** Expo Router's `(tabs)` layout picks up files alphabetically. `feed.tsx` comes before `index.tsx`, which will reorder the tabs. Set explicit `tabBarItemStyle` or use the `href` ordering in `_layout.tsx` to control tab order. Desired order: Library, Search, Capture, Review, Feed.
+
+- **Mutual-only feed:** `get_feed()` correctly filters to `status = 'accepted'` friendships. If a friendship is deleted after entries are shared, those entries disappear from the ex-friend's feed automatically (the RLS policy re-evaluates on every query).

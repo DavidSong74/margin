@@ -28,6 +28,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { supabase } from "@/lib/supabase";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { useColors } from "@/hooks/useColors";
+import { processCaptureQueue } from "@/lib/captureQueue";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -171,9 +172,10 @@ export default function RootLayout() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
-      if (session?.user) {
+      // Only register push token on explicit sign-in, not on every token refresh
+      if (event === "SIGNED_IN" && session?.user) {
         registerPushToken(session.user.id);
       }
     });
@@ -186,6 +188,16 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
+
+  // N7: Process offline capture queue whenever app returns to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (nextState: AppStateStatus) => {
+      if (nextState === "active") {
+        processCaptureQueue().catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   if (!fontsLoaded && !fontError) return null;
 

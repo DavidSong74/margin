@@ -133,18 +133,18 @@ create policy "glossary: delete own"
 -- ── save_correction RPC ───────────────────────────────────
 -- Atomically writes to both corrections and glossary.
 -- Called from the mobile app when a user approves an edit.
+-- Uses auth.uid() directly — no p_user_id parameter needed (IDOR fix).
 create or replace function save_correction(
   p_page_id   uuid,
   p_original  text,
-  p_corrected text,
-  p_user_id   uuid
+  p_corrected text
 ) returns void language plpgsql security invoker as $$
 begin
   insert into corrections (page_id, original_word, corrected_word)
     values (p_page_id, p_original, p_corrected);
 
   insert into glossary (user_id, original_word, corrected_word, updated_at)
-    values (p_user_id, p_original, p_corrected, now())
+    values (auth.uid(), p_original, p_corrected, now())
     on conflict (user_id, original_word)
     do update set corrected_word = excluded.corrected_word, updated_at = now();
 end;

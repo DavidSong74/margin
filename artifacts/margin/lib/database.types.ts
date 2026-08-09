@@ -1,4 +1,4 @@
-// Hand-authored from 001_init_schema.sql.
+// Hand-authored from migrations.
 // Regenerate after schema changes: supabase gen types typescript --project-id <ref> > lib/database.types.ts
 
 export type Json =
@@ -186,6 +186,135 @@ export interface Database {
         };
         Relationships: [];
       };
+      friendships: {
+        Row: {
+          id: string;
+          requester_id: string;
+          addressee_id: string;
+          status: "pending" | "accepted" | "declined";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          requester_id: string;
+          addressee_id: string;
+          status?: "pending" | "accepted" | "declined";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          requester_id?: string;
+          addressee_id?: string;
+          status?: "pending" | "accepted" | "declined";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: string;
+          from_user_id: string | null;
+          data: Json;
+          read: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          type: string;
+          from_user_id?: string | null;
+          data?: Json;
+          read?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          type?: string;
+          from_user_id?: string | null;
+          data?: Json;
+          read?: boolean;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      shared_entries: {
+        Row: {
+          id: string;
+          user_id: string;
+          page_id: string;
+          excerpt_text: string;
+          share_type: "page" | "snippet";
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          page_id: string;
+          excerpt_text: string;
+          share_type?: "page" | "snippet";
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          page_id?: string;
+          excerpt_text?: string;
+          share_type?: "page" | "snippet";
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      feed_likes: {
+        Row: {
+          id: string;
+          user_id: string;
+          entry_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          entry_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          entry_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      feed_comments: {
+        Row: {
+          id: string;
+          user_id: string;
+          entry_id: string;
+          comment_text: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          entry_id: string;
+          comment_text: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          entry_id?: string;
+          comment_text?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -194,7 +323,6 @@ export interface Database {
           p_page_id: string;
           p_original: string;
           p_corrected: string;
-          p_user_id: string;
         };
         Returns: undefined;
       };
@@ -233,6 +361,63 @@ export interface Database {
       reorder_pages: {
         Args: { p_journal_id: string; p_page_ids: string[] };
         Returns: undefined;
+      };
+      get_journals_with_counts: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          id: string;
+          title: string;
+          cover_style: string;
+          cover_color: string | null;
+          cover_image_url: string | null;
+          is_private: boolean;
+          created_at: string;
+          page_count: number;
+          pending_count: number;
+        }>;
+      };
+      find_user_by_email: {
+        Args: { p_email: string };
+        Returns: Array<{ user_id: string; user_email: string }>;
+      };
+      get_friends: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          friend_id: string;
+          friendship_id: string;
+          since: string;
+        }>;
+      };
+      get_pending_friend_requests: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          friendship_id: string;
+          from_user_id: string;
+          created_at: string;
+        }>;
+      };
+      get_feed: {
+        Args: { p_limit?: number; p_offset?: number };
+        Returns: Array<{
+          entry_id: string;
+          user_id: string;
+          page_id: string;
+          excerpt_text: string;
+          share_type: string;
+          created_at: string;
+          like_count: number;
+          comment_count: number;
+          viewer_liked: boolean;
+        }>;
+      };
+      get_comments: {
+        Args: { p_entry_id: string };
+        Returns: Array<{
+          comment_id: string;
+          user_id: string;
+          comment_text: string;
+          created_at: string;
+        }>;
       };
     };
     Enums: Record<string, never>;

@@ -15,6 +15,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -62,6 +63,7 @@ const PageItem = React.memo(function PageItem({
   editMode,
   contentView,
   colors,
+  dimmed,
   onUpdateText,
   onOpenCorrection,
 }: {
@@ -71,13 +73,14 @@ const PageItem = React.memo(function PageItem({
   editMode: boolean;
   contentView: ContentView;
   colors: ReturnType<typeof useColors>;
+  dimmed?: boolean;
   onUpdateText: (text: string) => void;
   onOpenCorrection: (index: number) => void;
 }) {
   const [zoomVisible, setZoomVisible] = useState(false);
 
   return (
-    <View style={{ width: effectiveW }}>
+    <View style={{ width: effectiveW, opacity: dimmed ? 0.25 : 1 }}>
       {/* Full-screen zoom viewer */}
       <Modal
         visible={zoomVisible}
@@ -264,11 +267,12 @@ export default function JournalReaderScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { width: rawW } = useWindowDimensions();
-  const params = useLocalSearchParams<{ id: string; title?: string; initial_page?: string }>();
+  const params = useLocalSearchParams<{ id: string; title?: string; initial_page?: string; isPrivate?: string }>();
 
   const journalId = params.id;
   const title = params.title ?? "Journal";
   const initialPage = params.initial_page ? Math.max(0, parseInt(params.initial_page, 10) - 1) : 0;
+  const isPrivateParam = params.isPrivate; // "true" | "false" | undefined
 
   const effectiveW =
     Platform.OS === "web" ? Math.min(rawW, MAX_CONTENT_W) : rawW;
@@ -291,6 +295,10 @@ export default function JournalReaderScreen() {
   const [currentPage, setCurrentPage] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [contentView, setContentView] = useState<ContentView>("transcription");
+
+  // ── N9: In-journal search ─────────────────────────────────────
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchText, setSearchText] = useState("");
 
   // ── Correction modal state ───────────────────────────────────
   const [corrModalPageIdx, setCorrModalPageIdx] = useState<number | null>(null);
@@ -383,19 +391,25 @@ export default function JournalReaderScreen() {
 
     async function checkPrivacy() {
       try {
-        const { data, error } = await supabase
-          .from("journals")
-          .select("is_private")
-          .eq("id", journalId)
-          .single();
+        let privateJournal: boolean;
 
-        if (error || !data) {
-          // Can't determine privacy status — fail open so the journal is usable
-          setPrivacyState("unlocked");
-          return;
+        if (isPrivateParam !== undefined) {
+          // O3: Use param from Library navigation — skip DB round trip
+          privateJournal = isPrivateParam === "true";
+        } else {
+          const { data, error } = await supabase
+            .from("journals")
+            .select("is_private")
+            .eq("id", journalId)
+            .single();
+
+          if (error || !data) {
+            setPrivacyState("unlocked");
+            return;
+          }
+          privateJournal = data.is_private ?? false;
         }
 
-        const privateJournal = data.is_private ?? false;
         setIsPrivate(privateJournal);
 
         if (!privateJournal) {
@@ -605,8 +619,7 @@ export default function JournalReaderScreen() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) throw new Error("Not authenticated");
+      if (!session?.user) throw new Error("Not authenticated");
 
       const page = pages[corrModalPageIdx];
       const decisions = corrDecisions.current;
@@ -620,7 +633,6 @@ export default function JournalReaderScreen() {
               p_page_id: page.id,
               p_original: corrections[i].original,
               p_corrected: d.corrected,
-              p_user_id: user.id,
             });
           }
           return null;
@@ -726,6 +738,48 @@ export default function JournalReaderScreen() {
     );
   }, [isPrivate, journalId]);
 
+  // ── N8: Share current page ───────────────────────────────────
+
+  const handleShare = useCallback(async () => {
+    const page = pages[currentPage];
+    if (!page?.transcriptionText) {
+      Alert.alert("Nothing to share", "This page hasn't been transcribed yet.");
+      return;
+    }
+    await Share.share({
+      message: page.transcriptionText,
+      title: `${title} — Page ${page.pageNumber}`,
+    });
+  }, [pages, currentPage, title]);
+
+  // ── N9: Search within journal ────────────────────────────────
+
+  const matchingPageIndices = React.useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return null;
+    return pages.reduce<number[]>((acc, p, i) => {
+      if (p.transcriptionText?.toLowerCase().includes(q)) acc.push(i);
+      return acc;
+    }, []);
+  }, [pages, searchText]);
+
+  const jumpToNextMatch = useCallback(() => {
+    if (!matchingPageIndices?.length) return;
+    const next =
+      matchingPageIndices.find((i) => i > currentPage) ?? matchingPageIndices[0];
+    setCurrentPage(next);
+    scrollRef.current?.scrollToOffset({ offset: next * effectiveW, animated: true });
+  }, [matchingPageIndices, currentPage, effectiveW]);
+
+  const jumpToPrevMatch = useCallback(() => {
+    if (!matchingPageIndices?.length) return;
+    const prev =
+      [...matchingPageIndices].reverse().find((i) => i < currentPage) ??
+      matchingPageIndices[matchingPageIndices.length - 1];
+    setCurrentPage(prev);
+    scrollRef.current?.scrollToOffset({ offset: prev * effectiveW, animated: true });
+  }, [matchingPageIndices, currentPage, effectiveW]);
+
   // ── Page reorder ─────────────────────────────────────────────
 
   const openReorder = useCallback(() => {
@@ -772,11 +826,12 @@ export default function JournalReaderScreen() {
         editMode={editMode}
         contentView={contentView}
         colors={colors}
+        dimmed={matchingPageIndices !== null && !matchingPageIndices.includes(index)}
         onUpdateText={(text) => updatePageText(index, text)}
         onOpenCorrection={openCorrectionModal}
       />
     ),
-    [effectiveW, editMode, contentView, colors, updatePageText, openCorrectionModal]
+    [effectiveW, editMode, contentView, colors, matchingPageIndices, updatePageText, openCorrectionModal]
   );
 
   // ── Computed values ──────────────────────────────────────────
@@ -974,6 +1029,37 @@ export default function JournalReaderScreen() {
               </TouchableOpacity>
             )}
 
+            {!editMode && (
+              <TouchableOpacity
+                style={styles.headerIconBtn}
+                onPress={handleShare}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Share this page"
+              >
+                <Feather name="share" size={19} color={colors.foreground} />
+              </TouchableOpacity>
+            )}
+
+            {!editMode && (
+              <TouchableOpacity
+                style={styles.headerIconBtn}
+                onPress={() => {
+                  setSearchVisible((v) => !v);
+                  if (searchVisible) setSearchText("");
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Search pages"
+              >
+                <Feather
+                  name="search"
+                  size={19}
+                  color={searchVisible ? colors.primary : colors.foreground}
+                />
+              </TouchableOpacity>
+            )}
+
             <View style={styles.editToggle}>
               <Text
                 style={[
@@ -1000,6 +1086,38 @@ export default function JournalReaderScreen() {
               />
             </View>
           </View>
+
+          {/* N9: Search bar */}
+          {searchVisible && (
+            <View style={[styles.searchBar, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+              <Feather name="search" size={15} color={colors.mutedForeground} />
+              <TextInput
+                style={[styles.searchInput, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}
+                value={searchText}
+                onChangeText={setSearchText}
+                placeholder="Search pages…"
+                placeholderTextColor={colors.mutedForeground}
+                autoFocus
+                returnKeyType="search"
+              />
+              {matchingPageIndices !== null && (
+                <>
+                  <Text style={[styles.searchCount, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+                    {matchingPageIndices.length}
+                  </Text>
+                  <TouchableOpacity onPress={jumpToPrevMatch} disabled={!matchingPageIndices.length} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Feather name="chevron-up" size={20} color={matchingPageIndices.length ? colors.foreground : colors.border} />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={jumpToNextMatch} disabled={!matchingPageIndices.length} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Feather name="chevron-down" size={20} color={matchingPageIndices.length ? colors.foreground : colors.border} />
+                  </TouchableOpacity>
+                </>
+              )}
+              <TouchableOpacity onPress={() => { setSearchVisible(false); setSearchText(""); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Feather name="x" size={18} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Page counter */}
           <Text
@@ -1744,6 +1862,28 @@ const styles = StyleSheet.create({
   // Lock / reorder buttons in header edit mode
   headerIconBtn: {
     padding: 6,
+  },
+
+  // N9: Search bar
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 6,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 2,
+  },
+  searchCount: {
+    fontSize: 13,
+    minWidth: 20,
+    textAlign: "right",
   },
 
   // Reorder modal

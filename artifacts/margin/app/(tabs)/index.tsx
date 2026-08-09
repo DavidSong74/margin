@@ -41,9 +41,7 @@ interface JournalItem {
   pendingCount: number;
 }
 
-type JournalRow = Database["public"]["Tables"]["journals"]["Row"] & {
-  pages: Array<{ count: number }>;
-};
+type JournalsWithCountsRow = Database["public"]["Functions"]["get_journals_with_counts"]["Returns"][number];
 
 type GridItem = { type: "new" } | { type: "journal"; journal: JournalItem };
 
@@ -282,6 +280,7 @@ const LibraryGridItem = React.memo(function LibraryGridItem({
               params: {
                 id: item.journal.id,
                 title: item.journal.title,
+                isPrivate: String(item.journal.isPrivate),
               },
             });
           }}
@@ -348,19 +347,11 @@ export default function LibraryScreen() {
 
   const fetchJournals = useCallback(async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) return;
-
-      const { data: rawData, error } = await supabase
-        .from("journals")
-        .select("*, pages(count)")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
+      // O2: Single RPC replaces two round trips (journals select + pending counts)
+      const { data: rawData, error } = await supabase.rpc("get_journals_with_counts");
       if (error) throw error;
 
-      const rows = (rawData ?? []) as unknown as JournalRow[];
+      const rows = (rawData ?? []) as JournalsWithCountsRow[];
 
       // Generate signed URLs for image covers in one batch call
       const imagePaths = rows
@@ -380,38 +371,20 @@ export default function LibraryScreen() {
       const mapped: JournalItem[] = rows.map((r) => ({
         id: r.id,
         title: r.title,
-        coverStyle: r.cover_style,
+        coverStyle: r.cover_style as "solid" | "image",
         coverColor: r.cover_color ?? undefined,
         coverImage:
           r.cover_style === "image" && r.cover_image_url
             ? signedUrlMap[r.cover_image_url]
             : undefined,
         coverImagePath: r.cover_image_url ?? undefined,
-        pageCount: r.pages?.[0]?.count ?? 0,
+        pageCount: r.page_count ?? 0,
         createdAt: r.created_at,
         isPrivate: r.is_private ?? false,
-        pendingCount: 0, // populated below via journal_pending_counts RPC
+        pendingCount: r.pending_count ?? 0,
       }));
 
       setJournals(mapped);
-
-      // Fetch pending transcription counts in one batch call
-      const ids = mapped.map((j) => j.id);
-      if (ids.length > 0) {
-        const { data: counts } = await supabase.rpc("journal_pending_counts", {
-          p_journal_ids: ids,
-        });
-        if (counts) {
-          const countMap = Object.fromEntries(
-            (counts as { journal_id: string; pending_count: number }[]).map(
-              (r) => [r.journal_id, r.pending_count]
-            )
-          );
-          setJournals((prev) =>
-            prev.map((j) => ({ ...j, pendingCount: countMap[j.id] ?? 0 }))
-          );
-        }
-      }
     } catch (err) {
       console.error("[Library] fetchJournals error:", err);
     } finally {

@@ -9,6 +9,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Platform,
   StyleSheet,
@@ -23,6 +24,7 @@ import { decode } from "base64-arraybuffer";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
+import { enqueueCapture } from "@/lib/captureQueue";
 
 // ── Pre-computed Base64 map for fast decoding ─────────────
 
@@ -251,13 +253,13 @@ export default function CaptureScreen() {
     setUploadError(null);
     setUploadProgress(0);
 
+    let pageNumber = 1; // resolved below; declared here so catch block can access it
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       if (!user) throw new Error("Not authenticated");
 
       // Determine page number — query DB only on first shot; increment locally after
-      let pageNumber: number;
       if (startPageNumber === null) {
         const { count } = await supabase
           .from("pages")
@@ -269,6 +271,7 @@ export default function CaptureScreen() {
       } else {
         pageNumber = startPageNumber + batchCount;
       }
+
 
       setUploadProgress(20);
       await uploadSinglePhoto(capturedUri, pageNumber, user);
@@ -282,9 +285,35 @@ export default function CaptureScreen() {
       setUploadProgress(0);
       setScreen("viewfinder");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Upload failed";
-      setUploadError(msg);
-      setScreen("preview");
+      // N7: On failure, copy photo to persistent storage and enqueue for retry
+      try {
+        if (capturedUri && journal_id) {
+          const persistedUri =
+            (FileSystem.documentDirectory ?? "") + `queue_${Date.now()}.jpg`;
+          await FileSystem.copyAsync({ from: capturedUri, to: persistedUri });
+          await enqueueCapture({
+            uri: persistedUri,
+            journalId: journal_id,
+            pageNumber,
+          });
+          Alert.alert(
+            "Saved offline",
+            "Photo saved locally and will upload when connectivity is restored.",
+          );
+          setBatchCount((n) => n + 1);
+          setCapturedUri(null);
+          setQualityIssue(null);
+          setUploadError(null);
+          setUploadProgress(0);
+          setScreen("viewfinder");
+        } else {
+          throw err;
+        }
+      } catch {
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        setUploadError(msg);
+        setScreen("preview");
+      }
     }
   }, [capturedUri, journal_id, startPageNumber, batchCount, uploadSinglePhoto]);
 
