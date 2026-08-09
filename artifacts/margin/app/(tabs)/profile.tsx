@@ -416,7 +416,7 @@ function StorageRow() {
 
 const PREFS_KEY = "margin:settings";
 
-type TranscriptionQuality = "standard" | "balanced" | "best";
+type TranscriptionQuality = "balanced" | "best";
 
 type Prefs = {
   dailyReminder: boolean;
@@ -945,7 +945,6 @@ export default function ProfileScreen() {
             last
             onPress={() => {
               const options: { key: TranscriptionQuality; label: string }[] = [
-                { key: "standard", label: "Standard — faster" },
                 { key: "balanced", label: "Balanced — default" },
                 { key: "best", label: "Best — highest accuracy" },
               ];

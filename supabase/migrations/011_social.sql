@@ -25,20 +25,24 @@ CREATE INDEX IF NOT EXISTS friendships_requester_idx ON friendships (requester_i
 
 ALTER TABLE friendships ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "friendships: select own" ON friendships;
 CREATE POLICY "friendships: select own"
   ON friendships FOR SELECT
   USING (auth.uid() = requester_id OR auth.uid() = addressee_id);
 
+DROP POLICY IF EXISTS "friendships: insert own" ON friendships;
 CREATE POLICY "friendships: insert own"
   ON friendships FOR INSERT
   WITH CHECK (auth.uid() = requester_id);
 
 -- Only the addressee may accept or decline
+DROP POLICY IF EXISTS "friendships: update own" ON friendships;
 CREATE POLICY "friendships: update own"
   ON friendships FOR UPDATE
   USING (auth.uid() = addressee_id);
 
 -- Either party may unfriend
+DROP POLICY IF EXISTS "friendships: delete own" ON friendships;
 CREATE POLICY "friendships: delete own"
   ON friendships FOR DELETE
   USING (auth.uid() = requester_id OR auth.uid() = addressee_id);
@@ -59,14 +63,17 @@ CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, rea
 
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "notifications: select own" ON notifications;
 CREATE POLICY "notifications: select own"
   ON notifications FOR SELECT
   USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "notifications: update own" ON notifications;
 CREATE POLICY "notifications: update own"
   ON notifications FOR UPDATE
   USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "notifications: delete own" ON notifications;
 CREATE POLICY "notifications: delete own"
   ON notifications FOR DELETE
   USING (auth.uid() = user_id);
@@ -89,11 +96,13 @@ CREATE INDEX IF NOT EXISTS shared_entries_user_idx ON shared_entries (user_id, c
 ALTER TABLE shared_entries ENABLE ROW LEVEL SECURITY;
 
 -- Author sees their own entries
+DROP POLICY IF EXISTS "shared_entries: select own" ON shared_entries;
 CREATE POLICY "shared_entries: select own"
   ON shared_entries FOR SELECT
   USING (auth.uid() = user_id);
 
 -- Mutually accepted friends see each other's entries
+DROP POLICY IF EXISTS "shared_entries: select friends" ON shared_entries;
 CREATE POLICY "shared_entries: select friends"
   ON shared_entries FOR SELECT
   USING (
@@ -108,10 +117,12 @@ CREATE POLICY "shared_entries: select friends"
     )
   );
 
+DROP POLICY IF EXISTS "shared_entries: insert own" ON shared_entries;
 CREATE POLICY "shared_entries: insert own"
   ON shared_entries FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "shared_entries: delete own" ON shared_entries;
 CREATE POLICY "shared_entries: delete own"
   ON shared_entries FOR DELETE
   USING (auth.uid() = user_id);
@@ -131,16 +142,19 @@ CREATE INDEX IF NOT EXISTS feed_likes_entry_idx ON feed_likes (entry_id);
 ALTER TABLE feed_likes ENABLE ROW LEVEL SECURITY;
 
 -- Anyone who can see the entry can see its likes
+DROP POLICY IF EXISTS "feed_likes: select visible" ON feed_likes;
 CREATE POLICY "feed_likes: select visible"
   ON feed_likes FOR SELECT
   USING (
     EXISTS (SELECT 1 FROM shared_entries se WHERE se.id = feed_likes.entry_id)
   );
 
+DROP POLICY IF EXISTS "feed_likes: insert own" ON feed_likes;
 CREATE POLICY "feed_likes: insert own"
   ON feed_likes FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "feed_likes: delete own" ON feed_likes;
 CREATE POLICY "feed_likes: delete own"
   ON feed_likes FOR DELETE
   USING (auth.uid() = user_id);
@@ -159,16 +173,19 @@ CREATE INDEX IF NOT EXISTS feed_comments_entry_idx ON feed_comments (entry_id, c
 
 ALTER TABLE feed_comments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "feed_comments: select visible" ON feed_comments;
 CREATE POLICY "feed_comments: select visible"
   ON feed_comments FOR SELECT
   USING (
     EXISTS (SELECT 1 FROM shared_entries se WHERE se.id = feed_comments.entry_id)
   );
 
+DROP POLICY IF EXISTS "feed_comments: insert own" ON feed_comments;
 CREATE POLICY "feed_comments: insert own"
   ON feed_comments FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "feed_comments: delete own" ON feed_comments;
 CREATE POLICY "feed_comments: delete own"
   ON feed_comments FOR DELETE
   USING (auth.uid() = user_id);
@@ -177,6 +194,7 @@ CREATE POLICY "feed_comments: delete own"
 -- ── RPCs ──────────────────────────────────────────────────────
 
 -- Find a user by email. SECURITY DEFINER required to query auth.users.
+DROP FUNCTION IF EXISTS public.find_user_by_email(text);
 CREATE OR REPLACE FUNCTION public.find_user_by_email(p_email text)
 RETURNS TABLE (user_id uuid, user_email text)
 LANGUAGE sql
@@ -192,6 +210,7 @@ $$;
 
 -- List accepted friends for the current user.
 -- SECURITY DEFINER: joins auth.users to surface friend email.
+DROP FUNCTION IF EXISTS public.get_friends();
 CREATE OR REPLACE FUNCTION public.get_friends()
 RETURNS TABLE (
   friend_id     uuid,
@@ -217,6 +236,7 @@ $$;
 
 -- Pending friend requests addressed to me.
 -- SECURITY DEFINER: joins auth.users to surface requester email.
+DROP FUNCTION IF EXISTS public.get_pending_friend_requests();
 CREATE OR REPLACE FUNCTION public.get_pending_friend_requests()
 RETURNS TABLE (
   friendship_id   uuid,
@@ -240,6 +260,7 @@ $$;
 
 -- Feed entries from friends (own entries + friends' entries) with aggregates.
 -- SECURITY DEFINER: joins auth.users to surface author email.
+DROP FUNCTION IF EXISTS public.get_feed(int, int);
 CREATE OR REPLACE FUNCTION public.get_feed(p_limit int DEFAULT 20, p_offset int DEFAULT 0)
 RETURNS TABLE (
   entry_id      uuid,
@@ -291,6 +312,7 @@ $$;
 
 -- Comments for a specific feed entry.
 -- SECURITY DEFINER: joins auth.users to surface commenter email.
+DROP FUNCTION IF EXISTS public.get_comments(uuid);
 CREATE OR REPLACE FUNCTION public.get_comments(p_entry_id uuid)
 RETURNS TABLE (
   comment_id    uuid,

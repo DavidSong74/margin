@@ -12,8 +12,10 @@ import { encodeBase64 } from "jsr:@std/encoding/base64";
 
 // ── Constants ──────────────────────────────────────────────
 
-const GEMINI_MODEL = "gemini-2.5-flash";
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_MODEL_FLASH = "gemini-2.5-flash";
+const GEMINI_MODEL_PRO   = "gemini-2.5-pro";
+const geminiEndpoint = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 const GLOSSARY_CAP = 50; // max glossary entries injected into prompt
 
 // ── Main handler ───────────────────────────────────────────
@@ -40,7 +42,7 @@ Deno.serve(async (req: Request) => {
 
   // ── 2. Parse body ────────────────────────────────────────
   let page_id: string;
-  let quality: "standard" | "balanced" | "best";
+  let quality: "balanced" | "best";
   try {
     const body = await req.json();
     page_id = body.page_id;
@@ -126,9 +128,7 @@ Deno.serve(async (req: Request) => {
 
     // ── 7. First Gemini pass — full transcription ───────────
     const qualityInstruction =
-      quality === "standard"
-        ? "Prioritize speed. Transcribe clearly legible words only; skip anything ambiguous."
-        : quality === "best"
+      quality === "best"
         ? "Prioritize accuracy above all else. Re-read every word using surrounding context clues before committing. Do not skip uncertain words — make your best inference."
         : "";
 
@@ -142,6 +142,8 @@ Deno.serve(async (req: Request) => {
       .filter(Boolean)
       .join("\n\n");
 
+    const geminiModel = quality === "best" ? GEMINI_MODEL_PRO : GEMINI_MODEL_FLASH;
+
     const transcriptionText = await callGemini(geminiKey, {
       systemInstruction: { parts: [{ text: systemInstructions }] },
       contents: [
@@ -153,8 +155,7 @@ Deno.serve(async (req: Request) => {
           ],
         },
       ],
-      thinkingConfig: { thinkingBudget: 0 },
-    });
+    }, geminiModel);
 
     // ── 8. Second Gemini pass — uncertain words ─────────────
     // Ask Gemini to identify words it was uncertain about.
@@ -182,7 +183,6 @@ Deno.serve(async (req: Request) => {
       generationConfig: {
         responseMimeType: "application/json",
       },
-      thinkingConfig: { thinkingBudget: 0 },
     });
 
     // Parse uncertain words — fail gracefully if Gemini returns malformed JSON
@@ -232,8 +232,9 @@ Deno.serve(async (req: Request) => {
 async function callGemini(
   apiKey: string,
   body: Record<string, unknown>,
+  model: string = GEMINI_MODEL_FLASH,
 ): Promise<string> {
-  const res = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey}`, {
+  const res = await fetch(`${geminiEndpoint(model)}?key=${apiKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
