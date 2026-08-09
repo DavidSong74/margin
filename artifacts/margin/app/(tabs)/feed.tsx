@@ -249,6 +249,22 @@ export default function FeedScreen() {
   const pt = insets.top;
   const pb = insets.bottom + TAB_BAR_H;
 
+  // ⚡ Bolt: Memoized renderItem to prevent inline function recreation on every render,
+  // which avoids unnecessary re-renders of all FeedCard components in the FlatList.
+  const renderItem = useCallback(
+    ({ item }: { item: FeedEntry }) => (
+      <FeedCard
+        entry={item}
+        colors={colors}
+        isExpanded={expandedIds.has(item.entry_id)}
+        onToggleExpand={handleToggleExpand}
+        onLike={handleLike}
+        onOpenComments={handleOpenComments}
+      />
+    ),
+    [colors, expandedIds, handleToggleExpand, handleLike, handleOpenComments]
+  );
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       {/* Header */}
@@ -299,16 +315,7 @@ export default function FeedScreen() {
             styles.listContent,
             { paddingBottom: pb },
           ]}
-          renderItem={({ item }) => (
-            <FeedCard
-              entry={item}
-              colors={colors}
-              isExpanded={expandedIds.has(item.entry_id)}
-              onToggleExpand={handleToggleExpand}
-              onLike={handleLike}
-              onOpenComments={handleOpenComments}
-            />
-          )}
+          renderItem={renderItem}
         />
       )}
 

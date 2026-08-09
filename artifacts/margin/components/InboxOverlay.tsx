@@ -49,6 +49,45 @@ interface Props {
   onNotificationsRead: () => void;
 }
 
+// ⚡ Bolt: Wrapped FriendItem in React.memo to prevent unnecessary re-renders
+// when parent state (like searchEmail) changes.
+const FriendItem = React.memo(function FriendItem({
+  item,
+  colors,
+}: {
+  item: Friend;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={[styles.friendRow, { borderColor: colors.border }]}>
+      <View
+        style={[
+          styles.friendAvatar,
+          { backgroundColor: colors.primary + "22" },
+        ]}
+      >
+        <Text
+          style={[
+            styles.friendInitial,
+            { color: colors.primary, fontFamily: "Inter_700Bold" },
+          ]}
+        >
+          {item.friend_email[0].toUpperCase()}
+        </Text>
+      </View>
+      <Text
+        style={[
+          styles.friendEmail,
+          { color: colors.foreground, fontFamily: "Inter_400Regular" },
+        ]}
+        numberOfLines={1}
+      >
+        {item.friend_email}
+      </Text>
+    </View>
+  );
+});
+
 export function InboxOverlay({ visible, onClose, onNotificationsRead }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -76,6 +115,13 @@ export function InboxOverlay({ visible, onClose, onNotificationsRead }: Props) {
     setPendingRequests((pendingData as unknown as PendingRequest[]) ?? []);
     setNotifications((notifData as AppNotification[]) ?? []);
   }, []);
+
+  // ⚡ Bolt: Memoized renderItem to prevent passing a new inline function reference to FlatList
+  // on every keystroke, which would cause the entire friends list to re-render.
+  const renderItem = useCallback(
+    ({ item }: { item: Friend }) => <FriendItem item={item} colors={colors} />,
+    [colors]
+  );
 
   useEffect(() => {
     if (!visible) return;
@@ -400,34 +446,7 @@ export function InboxOverlay({ visible, onClose, onNotificationsRead }: Props) {
               data={friends}
               keyExtractor={(f) => f.friend_id}
               showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => (
-                <View style={[styles.friendRow, { borderColor: colors.border }]}>
-                  <View
-                    style={[
-                      styles.friendAvatar,
-                      { backgroundColor: colors.primary + "22" },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.friendInitial,
-                        { color: colors.primary, fontFamily: "Inter_700Bold" },
-                      ]}
-                    >
-                      {item.friend_email[0].toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text
-                    style={[
-                      styles.friendEmail,
-                      { color: colors.foreground, fontFamily: "Inter_400Regular" },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {item.friend_email}
-                  </Text>
-                </View>
-              )}
+              renderItem={renderItem}
             />
           )}
         </View>
