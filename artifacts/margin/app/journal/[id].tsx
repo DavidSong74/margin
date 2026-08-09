@@ -1,7 +1,9 @@
 import { Feather } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect, router, useLocalSearchParams } from "expo-router";
+import { decode } from "base64-arraybuffer";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -28,6 +30,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import * as LocalAuthentication from "expo-local-authentication";
 
+import { CropEditor } from "@/components/CropEditor";
 import { useColors } from "@/hooks/useColors";
 import { supabase } from "@/lib/supabase";
 import type { PendingCorrection } from "@/lib/database.types";
@@ -67,6 +70,7 @@ const PageItem = React.memo(function PageItem({
   onUpdateText,
   onOpenCorrection,
   onTextSelection,
+  onCropPress,
 }: {
   page: JournalPage;
   index: number;
@@ -78,6 +82,7 @@ const PageItem = React.memo(function PageItem({
   onUpdateText: (text: string) => void;
   onOpenCorrection: (index: number) => void;
   onTextSelection?: (sel: { start: number; end: number } | null) => void;
+  onCropPress?: (pageId: string, imagePath: string, signedUrl: string) => void;
 }) {
   const [zoomVisible, setZoomVisible] = useState(false);
 
@@ -128,20 +133,34 @@ const PageItem = React.memo(function PageItem({
               showsVerticalScrollIndicator={false}
             >
               {page.signedImageUrl ? (
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  onPress={() => setZoomVisible(true)}
-                >
-                  <Image
-                    source={{ uri: page.signedImageUrl }}
-                    style={[
-                      styles.originalImage,
-                      { borderColor: colors.border },
-                    ]}
-                    resizeMode="contain"
-                    accessibilityLabel={`Original handwritten photo of page ${index + 1}. Tap to zoom.`}
-                  />
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => setZoomVisible(true)}
+                  >
+                    <Image
+                      source={{ uri: page.signedImageUrl }}
+                      style={[
+                        styles.originalImage,
+                        { borderColor: colors.border },
+                      ]}
+                      resizeMode="contain"
+                      accessibilityLabel={`Original handwritten photo of page ${index + 1}. Tap to zoom.`}
+                    />
+                  </TouchableOpacity>
+                  {onCropPress && (
+                    <TouchableOpacity
+                      style={[styles.cropBtn, { borderColor: colors.border }]}
+                      onPress={() => onCropPress(page.id, page.imagePath, page.signedImageUrl!)}
+                      activeOpacity={0.75}
+                    >
+                      <Feather name="crop" size={15} color={colors.foreground} />
+                      <Text style={[styles.cropBtnText, { color: colors.foreground, fontFamily: "Inter_500Medium" }]}>
+                        Crop & Re-transcribe
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </>
               ) : (
                 <View
                   style={[
@@ -320,6 +339,15 @@ export default function JournalReaderScreen() {
   const [corrEditText, setCorrEditText] = useState("");
   const [corrSaving, setCorrSaving] = useState(false);
   const corrDecisions = useRef<CorrDecision[]>([]);
+
+  // ── Crop & Re-transcribe ─────────────────────────────────────
+  const [cropState, setCropState] = useState<{
+    pageId: string;
+    imagePath: string;
+    uri: string;
+    width: number;
+    height: number;
+  } | null>(null);
 
   const scrollRef = useRef<FlatList<JournalPage>>(null);
   const totalPages = pages.length;
@@ -735,6 +763,82 @@ export default function JournalReaderScreen() {
     // On success, the Realtime subscription updates status to "done" automatically
   }, [pages, currentPage]);
 
+  // ── Crop & Re-transcribe ─────────────────────────────────────
+
+  const handleCropPress = useCallback(
+    (pageId: string, imagePath: string, signedUrl: string) => {
+      Image.getSize(
+        signedUrl,
+        (width, height) => setCropState({ pageId, imagePath, uri: signedUrl, width, height }),
+        () => Alert.alert("Error", "Could not prepare image for cropping.")
+      );
+    },
+    []
+  );
+
+  const handleCropResult = useCallback(
+    async (croppedUri: string) => {
+      if (!cropState) return;
+      const { pageId, imagePath } = cropState;
+      setCropState(null);
+      setContentView("transcription");
+
+      setPages((prev) =>
+        prev.map((p) => (p.id === pageId ? { ...p, transcriptionStatus: "processing" } : p))
+      );
+
+      try {
+        const base64 = await FileSystem.readAsStringAsync(croppedUri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        const { error: uploadErr } = await supabase.storage
+          .from("journal_pages")
+          .upload(imagePath, decode(base64), { upsert: true, contentType: "image/jpeg" });
+
+        if (uploadErr) throw uploadErr;
+
+        const { data: signed } = await supabase.storage
+          .from("journal_pages")
+          .createSignedUrl(imagePath, 3600);
+
+        await supabase
+          .from("pages")
+          .update({
+            transcription_text: null,
+            transcription_status: "pending",
+            pending_corrections: [],
+            correction_count: 0,
+          })
+          .eq("id", pageId);
+
+        setPages((prev) =>
+          prev.map((p) =>
+            p.id === pageId
+              ? {
+                  ...p,
+                  signedImageUrl: signed?.signedUrl ?? p.signedImageUrl,
+                  transcriptionText: null,
+                  transcriptionStatus: "pending",
+                  pendingCorrections: [],
+                  correctionCount: 0,
+                }
+              : p
+          )
+        );
+
+        await supabase.functions.invoke("transcribe", { body: { page_id: pageId } });
+      } catch (err) {
+        console.error("[Reader] crop upload error:", err);
+        setPages((prev) =>
+          prev.map((p) => (p.id === pageId ? { ...p, transcriptionStatus: "failed" } : p))
+        );
+        Alert.alert("Error", "Could not upload cropped image. Please try again.");
+      }
+    },
+    [cropState]
+  );
+
   // ── Per-journal privacy toggle ───────────────────────────────
 
   const togglePrivacy = useCallback(async () => {
@@ -941,9 +1045,10 @@ export default function JournalReaderScreen() {
         onUpdateText={(text) => updatePageText(index, text)}
         onOpenCorrection={openCorrectionModal}
         onTextSelection={handleTextSelection}
+        onCropPress={handleCropPress}
       />
     ),
-    [effectiveW, editMode, contentView, colors, matchingPageIndices, updatePageText, openCorrectionModal, handleTextSelection]
+    [effectiveW, editMode, contentView, colors, matchingPageIndices, updatePageText, openCorrectionModal, handleTextSelection, handleCropPress]
   );
 
   // ── Computed values ──────────────────────────────────────────
@@ -1620,6 +1725,24 @@ export default function JournalReaderScreen() {
         </View>
       </Modal>
 
+      {/* ── Crop & Re-transcribe modal ─────────────────────── */}
+      <Modal
+        visible={cropState !== null}
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setCropState(null)}
+      >
+        {cropState && (
+          <CropEditor
+            uri={cropState.uri}
+            imageWidth={cropState.width}
+            imageHeight={cropState.height}
+            onCrop={handleCropResult}
+            onCancel={() => setCropState(null)}
+          />
+        )}
+      </Modal>
+
       {/* ── Correction modal ───────────────────────────────── */}
       <Modal
         visible={corrModalPageIdx !== null}
@@ -2159,6 +2282,19 @@ const styles = StyleSheet.create({
     gap: 4,
     alignItems: "center",
   },
+
+  // Crop button (Original tab)
+  cropBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    marginTop: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  cropBtnText: { fontSize: 14 },
 
   // Full-screen image zoom viewer
   zoomOverlay: {

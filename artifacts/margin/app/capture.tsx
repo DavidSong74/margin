@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { decode } from "base64-arraybuffer";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CropEditor } from "@/components/CropEditor";
 import { supabase } from "@/lib/supabase";
 import { enqueueCapture } from "@/lib/captureQueue";
 
@@ -36,7 +37,7 @@ for (let i = 0; i < B64_CHARS.length; i++) {
 
 // ── Types ─────────────────────────────────────────────────
 
-type ScreenState = "permission" | "viewfinder" | "preview" | "uploading" | "batch_uploading";
+type ScreenState = "permission" | "viewfinder" | "crop" | "preview" | "uploading" | "batch_uploading";
 
 type QualityIssue = "dark" | "blur" | null;
 
@@ -98,6 +99,7 @@ export default function CaptureScreen() {
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [batchCount, setBatchCount] = useState(0);
   const [startPageNumber, setStartPageNumber] = useState<number | null>(null);
+  const [capturedDims, setCapturedDims] = useState<{ width: number; height: number } | null>(null);
 
   const cameraRef = useRef<CameraView>(null);
   const flashAnim = useRef(new Animated.Value(0)).current;
@@ -111,7 +113,7 @@ export default function CaptureScreen() {
     uri: string,
     photoW: number,
     photoH: number,
-  ): Promise<string> => {
+  ): Promise<{ uri: string; width: number; height: number }> => {
     const frameTopOnScreen = (SCREEN_H - FRAME_H) / 2 - 20;
 
     // Scale factor for "cover" — whichever axis fills first
@@ -133,7 +135,7 @@ export default function CaptureScreen() {
       [{ crop: { originX, originY, width: cropW, height: cropH } }],
       { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG },
     );
-    return result.uri;
+    return { uri: result.uri, width: result.width, height: result.height };
   }, [SCREEN_W, SCREEN_H, FRAME_W, FRAME_H]);
 
   // ── Capture ────────────────────────────────────────────
@@ -152,11 +154,12 @@ export default function CaptureScreen() {
     const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, skipProcessing: false });
     if (!photo) return;
 
-    const croppedUri = await cropToFrame(photo.uri, photo.width, photo.height);
-    const issue = await checkQuality(croppedUri);
+    const cropped = await cropToFrame(photo.uri, photo.width, photo.height);
+    const issue = await checkQuality(cropped.uri);
     setQualityIssue(issue);
-    setCapturedUri(croppedUri);
-    setScreen("preview");
+    setCapturedUri(cropped.uri);
+    setCapturedDims({ width: cropped.width, height: cropped.height });
+    setScreen("crop");
   }, [flashAnim, cropToFrame]);
 
   // ── Quality check ─────────────────────────────────────
@@ -519,6 +522,23 @@ export default function CaptureScreen() {
     );
   }
 
+  // ── Crop ──────────────────────────────────────────────
+
+  if (screen === "crop" && capturedUri && capturedDims) {
+    return (
+      <CropEditor
+        uri={capturedUri}
+        imageWidth={capturedDims.width}
+        imageHeight={capturedDims.height}
+        onCrop={(croppedUri) => {
+          setCapturedUri(croppedUri);
+          setScreen("preview");
+        }}
+        onCancel={() => setScreen("preview")}
+      />
+    );
+  }
+
   // ── Preview ────────────────────────────────────────────
 
   if (screen === "preview" && capturedUri) {
@@ -570,6 +590,15 @@ export default function CaptureScreen() {
             <Feather name="rotate-ccw" size={16} color="#fff" style={{ marginRight: 8 }} />
             <Text style={styles.retakeBtnText}>Retake</Text>
           </TouchableOpacity>
+          {capturedDims && (
+            <TouchableOpacity
+              style={styles.retakeBtn}
+              onPress={() => setScreen("crop")}
+            >
+              <Feather name="crop" size={16} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.retakeBtnText}>Crop</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.useBtn} onPress={usePhoto}>
             <Text style={styles.useBtnText}>Use this photo</Text>
             <Feather name="arrow-right" size={16} color="#fff" style={{ marginLeft: 8 }} />
