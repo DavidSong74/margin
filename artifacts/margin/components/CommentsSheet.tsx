@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -31,6 +31,37 @@ interface Props {
   onClose: () => void;
 }
 
+// ⚡ Bolt: Wrapped CommentItem in React.memo to prevent unnecessary re-renders
+// when parent state (like newText) changes.
+const CommentItem = React.memo(function CommentItem({
+  item,
+  colors,
+}: {
+  item: Comment;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={styles.commentRow}>
+      <Text
+        style={[
+          styles.commentAuthor,
+          { color: colors.primary, fontFamily: "Inter_600SemiBold" },
+        ]}
+      >
+        {item.author_email}
+      </Text>
+      <Text
+        style={[
+          styles.commentText,
+          { color: colors.foreground, fontFamily: "Inter_400Regular" },
+        ]}
+      >
+        {item.comment_text}
+      </Text>
+    </View>
+  );
+});
+
 export function CommentsSheet({ entryId, onClose }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -54,6 +85,13 @@ export function CommentsSheet({ entryId, onClose }: Props) {
         setLoading(false);
       });
   }, [entryId]);
+
+  // ⚡ Bolt: Memoized renderItem to prevent passing a new inline function reference to FlatList
+  // on every keystroke, which would cause the entire comments list to re-render.
+  const renderItem = useCallback(
+    ({ item }: { item: Comment }) => <CommentItem item={item} colors={colors} />,
+    [colors]
+  );
 
   async function handleSend() {
     const text = newText.trim();
@@ -147,26 +185,7 @@ export function CommentsSheet({ entryId, onClose }: Props) {
                   No comments yet. Be the first!
                 </Text>
               }
-              renderItem={({ item }) => (
-                <View style={styles.commentRow}>
-                  <Text
-                    style={[
-                      styles.commentAuthor,
-                      { color: colors.primary, fontFamily: "Inter_600SemiBold" },
-                    ]}
-                  >
-                    {item.author_email}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.commentText,
-                      { color: colors.foreground, fontFamily: "Inter_400Regular" },
-                    ]}
-                  >
-                    {item.comment_text}
-                  </Text>
-                </View>
-              )}
+              renderItem={renderItem}
             />
           )}
 
