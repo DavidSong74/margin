@@ -354,6 +354,15 @@ export interface Database {
         Args: Record<string, never>;
         Returns: number;
       };
+      get_user_stats: {
+        Args: Record<never, never>;
+        Returns: {
+          total_pages: number;
+          total_words: number;
+          total_journals: number;
+          streak_days: number;
+        };
+      };
       journal_pending_counts: {
         Args: { p_journal_ids: string[] };
         Returns: Array<{

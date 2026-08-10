@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useColorScheme } from "react-native";
 
 import colors from "@/constants/colors";
@@ -8,6 +9,10 @@ export function useColors() {
   const systemScheme = useColorScheme();
 
   const resolved = theme === "system" ? systemScheme : theme;
-  const palette = resolved === "dark" && colors.dark ? colors.dark : colors.light;
-  return { ...palette, radius: colors.radius };
+  
+  return useMemo(() => {
+    const palette = resolved === "dark" && colors.dark ? colors.dark : colors.light;
+    return { ...palette, radius: colors.radius };
+  }, [resolved]);
 }
+

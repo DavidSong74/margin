@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -32,6 +33,7 @@ import * as LocalAuthentication from "expo-local-authentication";
 
 import { CropEditor } from "@/components/CropEditor";
 import { useColors } from "@/hooks/useColors";
+import { useReaderFontSize } from "@/hooks/useReaderFontSize";
 import { supabase } from "@/lib/supabase";
 import type { PendingCorrection } from "@/lib/database.types";
 
@@ -73,6 +75,7 @@ const PageItem = React.memo(function PageItem({
   onTextSelection,
   onCropPress,
   onResetPress,
+  readerFont,
 }: {
   page: JournalPage;
   index: number;
@@ -86,6 +89,7 @@ const PageItem = React.memo(function PageItem({
   onTextSelection?: (sel: { start: number; end: number } | null) => void;
   onCropPress?: (pageId: string, imagePath: string, signedUrl: string) => void;
   onResetPress?: (pageId: string) => void;
+  readerFont: { fontSize: number; lineHeight: number };
 }) {
   const [zoomVisible, setZoomVisible] = useState(false);
 
@@ -209,6 +213,7 @@ const PageItem = React.memo(function PageItem({
                   styles.pageText,
                   styles.pageInput,
                   {
+                    fontSize: readerFont.fontSize,
                     color: colors.foreground,
                     backgroundColor: colors.card,
                     fontFamily: "PlayfairDisplay_400Regular",
@@ -287,7 +292,12 @@ const PageItem = React.memo(function PageItem({
                   selectionColor={colors.primary + "60"}
                   style={[
                     styles.pageText,
-                    { color: colors.foreground, fontFamily: "PlayfairDisplay_400Regular" },
+                    {
+                      fontSize: readerFont.fontSize,
+                      lineHeight: readerFont.lineHeight,
+                      color: colors.foreground,
+                      fontFamily: "PlayfairDisplay_400Regular",
+                    },
                   ]}
                   accessibilityLabel={`Transcription of page ${index + 1}`}
                   onSelectionChange={(e) => {
@@ -308,6 +318,7 @@ const PageItem = React.memo(function PageItem({
 
 export default function JournalReaderScreen() {
   const colors = useColors();
+  const readerFont = useReaderFontSize();
   const insets = useSafeAreaInsets();
   const { width: rawW } = useWindowDimensions();
   const params = useLocalSearchParams<{ id: string; title?: string; initial_page?: string; isPrivate?: string }>();
@@ -323,6 +334,18 @@ export default function JournalReaderScreen() {
   // ── Page data ────────────────────────────────────────────────
   const [pages, setPages] = useState<JournalPage[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const lastFetchedAt = useRef<number>(0);
+  const FETCH_STALE_MS = 30_000; // treat data as fresh for 30 seconds
+  const pagesRef = useRef<JournalPage[]>([]);
+
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
+
+  useEffect(() => {
+    lastFetchedAt.current = 0;
+  }, [journalId]);
 
   // ── Per-journal privacy ───────────────────────────────────────
   const [isPrivate, setIsPrivate] = useState(false);
@@ -369,6 +392,10 @@ export default function JournalReaderScreen() {
 
   const fetchPages = useCallback(async () => {
     if (!journalId) return;
+    const now = Date.now();
+    const isStale = now - lastFetchedAt.current > FETCH_STALE_MS;
+    if (!isStale && pagesRef.current.length > 0) return; // data is fresh, skip
+
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -410,6 +437,7 @@ export default function JournalReaderScreen() {
         correctionCount: r.correction_count,
       }));
 
+      lastFetchedAt.current = Date.now();
       setPages(mapped);
 
       // Determine which page to open: explicit route param takes priority, then AsyncStorage
@@ -558,6 +586,70 @@ export default function JournalReaderScreen() {
       supabase.removeChannel(channel);
     };
   }, [journalId]);
+
+  // ── O2: Signed URL refresh on AppState foreground ────────────
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", async (nextState) => {
+      if (nextState !== "active") return;
+      if (!pages.length) return;
+
+      // Re-generate signed URLs for all current page image paths
+      const imagePaths = pages.map((p) => p.imagePath).filter(Boolean);
+      if (!imagePaths.length) return;
+
+      const { data: signed } = await supabase.storage
+        .from("journal_pages")
+        .createSignedUrls(imagePaths, 3600);
+
+      if (!signed) return;
+      const signedMap: Record<string, string> = Object.fromEntries(
+        signed.map((s) => [s.path, s.signedUrl])
+      );
+
+      setPages((prev) =>
+        prev.map((p) => {
+          const fresh = signedMap[p.imagePath];
+          return fresh ? { ...p, signedImageUrl: fresh } : p;
+        })
+      );
+    });
+
+    return () => sub.remove();
+  }, [pages]);
+
+  // ── O5: Transcription stuck detection + recovery ─────────────
+  useEffect(() => {
+    const stuckIds = pages
+      .filter((p) => p.transcriptionStatus === "pending" || p.transcriptionStatus === "processing")
+      .map((p) => p.id);
+
+    if (!stuckIds.length) return;
+
+    const timer = setInterval(async () => {
+      const { data } = await supabase
+        .from("pages")
+        .select("id, transcription_text, transcription_status, pending_corrections, correction_count")
+        .in("id", stuckIds);
+
+      if (!data) return;
+
+      setPages((prev) =>
+        prev.map((p) => {
+          const updated = data.find((d) => d.id === p.id);
+          if (!updated) return p;
+          return {
+            ...p,
+            transcriptionText: updated.transcription_text,
+            transcriptionStatus: updated.transcription_status as JournalPage["transcriptionStatus"],
+            pendingCorrections: (updated.pending_corrections as PendingCorrection[]) ?? [],
+            correctionCount: updated.correction_count ?? 0,
+          };
+        })
+      );
+    }, 30_000);
+
+    return () => clearInterval(timer);
+  }, [pages.map((p) => p.transcriptionStatus).join(",")]);
 
   // ── Soft-delete current page ─────────────────────────────────
 
@@ -849,6 +941,14 @@ export default function JournalReaderScreen() {
           )
         );
 
+        // Delete the replaced file, but never delete the user's original
+        if (imagePath !== originalPath) {
+          supabase.storage
+            .from("journal_pages")
+            .remove([imagePath])
+            .catch((e) => console.warn("[Reader] cleanup old crop:", e));
+        }
+
         await supabase.functions.invoke("transcribe", { body: { page_id: pageId } });
       } catch (err) {
         console.error("[Reader] crop upload error:", err);
@@ -1129,9 +1229,10 @@ export default function JournalReaderScreen() {
         onTextSelection={handleTextSelection}
         onCropPress={handleCropPress}
         onResetPress={handleResetCrop}
+        readerFont={readerFont}
       />
     ),
-    [effectiveW, editMode, contentView, colors, matchingPageIndices, updatePageText, openCorrectionModal, handleTextSelection, handleCropPress, handleResetCrop]
+    [effectiveW, editMode, contentView, colors, matchingPageIndices, updatePageText, openCorrectionModal, handleTextSelection, handleCropPress, handleResetCrop, readerFont]
   );
 
   // ── Computed values ──────────────────────────────────────────
@@ -2118,8 +2219,6 @@ const styles = StyleSheet.create({
   scrollPad: { paddingVertical: 18, paddingBottom: 40 },
 
   pageText: {
-    fontSize: 18,
-    lineHeight: 32,
     letterSpacing: 0.1,
   },
   pageInput: {

@@ -417,6 +417,7 @@ function StorageRow() {
 const PREFS_KEY = "margin:settings";
 
 type TranscriptionQuality = "balanced" | "best";
+type ReaderFontSize = "small" | "normal" | "large";
 
 type Prefs = {
   dailyReminder: boolean;
@@ -427,6 +428,9 @@ type Prefs = {
   appLock: boolean;
   coverColor: string;
   transcriptionQuality: TranscriptionQuality;
+  reminderHour: number;
+  reminderMinute: number;
+  readerFontSize: ReaderFontSize;
 };
 
 const DEFAULT_PREFS: Prefs = {
@@ -438,7 +442,85 @@ const DEFAULT_PREFS: Prefs = {
   appLock: false,
   coverColor: COVER_COLORS[0],
   transcriptionQuality: "balanced",
+  reminderHour: 21,
+  reminderMinute: 0,
+  readerFontSize: "normal",
 };
+
+function formatTime(hour: number, minute: number): string {
+  const period = hour >= 12 ? "PM" : "AM";
+  const h = hour % 12 === 0 ? 12 : hour % 12;
+  const m = minute.toString().padStart(2, "0");
+  return `${h}:${m} ${period}`;
+}
+
+function StatsSection() {
+  const colors = useColors();
+  const [stats, setStats] = useState<{
+    total_pages: number;
+    total_words: number;
+    total_journals: number;
+    streak_days: number;
+  } | null>(null);
+
+  useEffect(() => {
+    supabase.rpc("get_user_stats").then(({ data }) => {
+      if (data) setStats(data as typeof stats);
+    });
+  }, []);
+
+  const items = stats
+    ? [
+        { label: "Journals", value: stats.total_journals.toString() },
+        { label: "Pages", value: stats.total_pages.toString() },
+        { label: "Words", value: stats.total_words.toLocaleString() },
+        { label: "Day streak", value: stats.streak_days.toString() },
+      ]
+    : null;
+
+  return (
+    <View
+      style={[
+        styles.statsCard,
+        { backgroundColor: colors.card, borderColor: colors.border },
+      ]}
+    >
+      {items ? (
+        items.map((item, i) => (
+          <View
+            key={item.label}
+            style={[
+              styles.statItem,
+              i < items.length - 1 && {
+                borderRightWidth: StyleSheet.hairlineWidth,
+                borderRightColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.statValue,
+                { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" },
+              ]}
+            >
+              {item.value}
+            </Text>
+            <Text
+              style={[
+                styles.statLabel,
+                { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+              ]}
+            >
+              {item.label}
+            </Text>
+          </View>
+        ))
+      ) : (
+        <ActivityIndicator size="small" color={colors.primary} />
+      )}
+    </View>
+  );
+}
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
@@ -466,6 +548,9 @@ export default function ProfileScreen() {
   const [transcriptionQuality, setTranscriptionQuality] = useState<TranscriptionQuality>(
     DEFAULT_PREFS.transcriptionQuality,
   );
+  const [reminderHour, setReminderHour] = useState(DEFAULT_PREFS.reminderHour);
+  const [reminderMinute, setReminderMinute] = useState(DEFAULT_PREFS.reminderMinute);
+  const [readerFontSize, setReaderFontSize] = useState<ReaderFontSize>(DEFAULT_PREFS.readerFontSize);
 
   // §5: Change password modal
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -502,6 +587,9 @@ export default function ProfileScreen() {
         if (stored.coverColor !== undefined) setCoverColor(stored.coverColor);
         if (stored.transcriptionQuality !== undefined)
           setTranscriptionQuality(stored.transcriptionQuality);
+        if (stored.reminderHour !== undefined) setReminderHour(stored.reminderHour);
+        if (stored.reminderMinute !== undefined) setReminderMinute(stored.reminderMinute);
+        if (stored.readerFontSize !== undefined) setReaderFontSize(stored.readerFontSize);
       }
       setPrefsLoaded(true);
     });
@@ -524,6 +612,7 @@ export default function ProfileScreen() {
     const current: Prefs = {
       dailyReminder, onThisDay, weeklyDigest,
       iCloudBackup, driveBackup, appLock, coverColor, transcriptionQuality,
+      reminderHour, reminderMinute, readerFontSize,
     };
     AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...patch }));
   }
@@ -572,53 +661,115 @@ export default function ProfileScreen() {
   async function handleExport() {
     Alert.alert(
       "Export archive",
-      "Creates a text file with all journal transcriptions.",
+      "What would you like to export?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Export",
-          onPress: async () => {
-            try {
-              const { data: { session } } = await supabase.auth.getSession();
-              if (!session) return;
-
-              const { data: pages } = await supabase
-                .from("pages")
-                .select("page_number, transcription_text, journals!inner(title, user_id)")
-                .eq("journals.user_id", session.user.id)
-                .order("page_number");
-
-              if (!pages?.length) {
-                Alert.alert("Nothing to export", "You have no journal pages yet.");
-                return;
-              }
-
-              let content = "Margin — Journal Export\n";
-              content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
-              for (const page of pages) {
-                content += `--- Page ${page.page_number} ---\n`;
-                content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
-              }
-
-              const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? "";
-              const filePath = dir + "margin_export.txt";
-              await FileSystem.writeAsStringAsync(filePath, content);
-
-              if (await Sharing.isAvailableAsync()) {
-                await Sharing.shareAsync(filePath, {
-                  mimeType: "text/plain",
-                  UTI: "public.plain-text",
-                });
-              } else {
-                Alert.alert("Sharing not available", "Your device doesn't support sharing files.");
-              }
-            } catch (e) {
-              Alert.alert("Export failed", e instanceof Error ? e.message : String(e));
-            }
-          },
+          text: "Text only",
+          onPress: () => exportText(),
         },
-      ],
+        {
+          text: "Images + text",
+          onPress: () => exportImages(),
+        },
+      ]
     );
+  }
+
+  async function exportText() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data: pages } = await supabase
+        .from("pages")
+        .select("page_number, transcription_text, journals!inner(title, user_id)")
+        .eq("journals.user_id", session.user.id)
+        .order("page_number");
+
+      if (!pages?.length) {
+        Alert.alert("Nothing to export", "You have no journal pages yet.");
+        return;
+      }
+
+      let content = "Margin — Journal Export\n";
+      content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
+      for (const page of pages) {
+        content += `--- Page ${page.page_number} ---\n`;
+        content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
+      }
+
+      const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? "";
+      const filePath = dir + "margin_export.txt";
+      await FileSystem.writeAsStringAsync(filePath, content);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(filePath, { mimeType: "text/plain", UTI: "public.plain-text" });
+      } else {
+        Alert.alert("Sharing not available", "Your device doesn't support sharing files.");
+      }
+    } catch (e) {
+      Alert.alert("Export failed", e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function exportImages() {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data: pages } = await supabase
+        .from("pages")
+        .select("page_number, image_path, transcription_text, journals!inner(title, user_id)")
+        .eq("journals.user_id", session.user.id)
+        .is("deleted_at", null)
+        .order("page_number");
+
+      if (!pages?.length) {
+        Alert.alert("Nothing to export", "You have no journal pages yet.");
+        return;
+      }
+
+      // Generate signed URLs for all pages in one batch
+      const paths = pages.map((p) => p.image_path).filter(Boolean);
+      const { data: signedList } = await supabase.storage
+        .from("journal_pages")
+        .createSignedUrls(paths, 300);
+
+      const signedMap: Record<string, string> = Object.fromEntries(
+        (signedList ?? []).map((s) => [s.path, s.signedUrl])
+      );
+
+      // Write images + a text file into a temp folder
+      const exportDir = (FileSystem.cacheDirectory ?? "") + "margin_export/";
+      await FileSystem.makeDirectoryAsync(exportDir, { intermediates: true });
+
+      for (const page of pages) {
+        const signedUrl = signedMap[page.image_path];
+        if (!signedUrl) continue;
+        const dest = `${exportDir}page_${String(page.page_number).padStart(3, "0")}.jpg`;
+        await FileSystem.downloadAsync(signedUrl, dest);
+      }
+
+      // Write transcript alongside the images
+      let content = "Margin — Journal Export\n";
+      content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
+      for (const page of pages) {
+        content += `--- Page ${page.page_number} ---\n`;
+        content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
+      }
+      await FileSystem.writeAsStringAsync(exportDir + "transcriptions.txt", content);
+
+      if (await Sharing.isAvailableAsync()) {
+        // Share the folder itself on iOS; on Android share the text file as fallback
+        const target = Platform.OS === "ios" ? exportDir : exportDir + "transcriptions.txt";
+        await Sharing.shareAsync(target, { mimeType: "text/plain", UTI: "public.folder" });
+      } else {
+        Alert.alert("Sharing not available", "Your device doesn't support sharing files.");
+      }
+    } catch (e) {
+      Alert.alert("Export failed", e instanceof Error ? e.message : String(e));
+    }
   }
 
   // ── §8: Clear cached images ───────────────────────────────────────────────
@@ -736,6 +887,9 @@ export default function ProfileScreen() {
           </Text>
         </View>
 
+        {/* ── Stats ── */}
+        <StatsSection />
+
         {/* ── Account ── */}
         <SectionHeader label="Account" />
         <SectionCard>
@@ -769,7 +923,7 @@ export default function ProfileScreen() {
                   return;
                 }
                 await scheduleDaily(
-                  "margin:daily_reminder", 21, 0,
+                  "margin:daily_reminder", reminderHour, reminderMinute,
                   "Time to write ✍️", "Your journal is waiting.",
                 );
               } else {
@@ -784,9 +938,41 @@ export default function ProfileScreen() {
               <Row
                 icon="clock"
                 label="Reminder time"
-                value="9:00 PM"
-                chevron={false}
+                value={formatTime(reminderHour, reminderMinute)}
                 last={false}
+                onPress={() => {
+                  const OPTIONS: { label: string; hour: number; minute: number }[] = [
+                    { label: "7:00 AM", hour: 7,  minute: 0 },
+                    { label: "8:00 AM", hour: 8,  minute: 0 },
+                    { label: "9:00 AM", hour: 9,  minute: 0 },
+                    { label: "12:00 PM", hour: 12, minute: 0 },
+                    { label: "6:00 PM", hour: 18, minute: 0 },
+                    { label: "8:00 PM", hour: 20, minute: 0 },
+                    { label: "9:00 PM", hour: 21, minute: 0 },
+                    { label: "10:00 PM", hour: 22, minute: 0 },
+                  ];
+                  Alert.alert(
+                    "Reminder time",
+                    "Choose when you'd like your daily writing reminder.",
+                    [
+                      ...OPTIONS.map((o) => ({
+                        text: o.label + (o.hour === reminderHour && o.minute === reminderMinute ? " ✓" : ""),
+                        onPress: async () => {
+                          setReminderHour(o.hour);
+                          setReminderMinute(o.minute);
+                          savePref({ reminderHour: o.hour, reminderMinute: o.minute });
+                          if (dailyReminder) {
+                            await scheduleDaily(
+                              "margin:daily_reminder", o.hour, o.minute,
+                              "Time to write ✍️", "Your journal is waiting.",
+                            );
+                          }
+                        },
+                      })),
+                      { text: "Cancel", style: "cancel" },
+                    ]
+                  );
+                }}
               />
             </>
           )}
@@ -942,7 +1128,6 @@ export default function ProfileScreen() {
             icon="cpu"
             label="AI transcription quality"
             value={transcriptionQuality.charAt(0).toUpperCase() + transcriptionQuality.slice(1)}
-            last
             onPress={() => {
               const options: { key: TranscriptionQuality; label: string }[] = [
                 { key: "balanced", label: "Balanced — default" },
@@ -961,6 +1146,30 @@ export default function ProfileScreen() {
                   })),
                   { text: "Cancel", style: "cancel" as const },
                 ],
+              );
+            }}
+          />
+          <Row
+            icon="type"
+            label="Text size"
+            value={readerFontSize.charAt(0).toUpperCase() + readerFontSize.slice(1)}
+            last
+            onPress={() => {
+              const OPTIONS: { key: ReaderFontSize; label: string }[] = [
+                { key: "small",  label: "Small"  },
+                { key: "normal", label: "Normal" },
+                { key: "large",  label: "Large"  },
+              ];
+              Alert.alert(
+                "Text size",
+                "Sets the size of transcription text in the journal reader.",
+                [
+                  ...OPTIONS.map((o) => ({
+                    text: o.label + (o.key === readerFontSize ? " ✓" : ""),
+                    onPress: () => { setReaderFontSize(o.key); savePref({ readerFontSize: o.key }); },
+                  })),
+                  { text: "Cancel", style: "cancel" as const },
+                ]
               );
             }}
           />
@@ -1191,5 +1400,27 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: "center",
     minWidth: 80,
+  },
+  statsCard: {
+    flexDirection: "row",
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 28,
+    overflow: "hidden",
+  },
+  statItem: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 16,
+    gap: 4,
+  },
+  statValue: {
+    fontSize: 22,
+    letterSpacing: -0.5,
+  },
+  statLabel: {
+    fontSize: 11,
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
   },
 });
