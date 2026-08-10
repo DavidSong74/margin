@@ -524,12 +524,10 @@ export default function CaptureScreen() {
 
   // ── Crop ──────────────────────────────────────────────
 
-  if (screen === "crop" && capturedUri && capturedDims) {
+  if (screen === "crop" && capturedUri) {
     return (
       <CropEditor
         uri={capturedUri}
-        imageWidth={capturedDims.width}
-        imageHeight={capturedDims.height}
         onCrop={(croppedUri) => {
           setCapturedUri(croppedUri);
           setScreen("preview");

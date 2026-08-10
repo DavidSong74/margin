@@ -56,6 +56,7 @@ export interface Database {
           journal_id: string;
           page_number: number;
           image_path: string;
+          original_image_path: string | null;
           thumbnail_path: string | null;
           transcription_text: string | null;
           transcription_status: "pending" | "processing" | "done" | "failed";
@@ -70,6 +71,7 @@ export interface Database {
           journal_id: string;
           page_number: number;
           image_path: string;
+          original_image_path?: string | null;
           thumbnail_path?: string | null;
           transcription_text?: string | null;
           transcription_status?: "pending" | "processing" | "done" | "failed";
@@ -84,6 +86,7 @@ export interface Database {
           journal_id?: string;
           page_number?: number;
           image_path?: string;
+          original_image_path?: string | null;
           thumbnail_path?: string | null;
           transcription_text?: string | null;
           transcription_status?: "pending" | "processing" | "done" | "failed";

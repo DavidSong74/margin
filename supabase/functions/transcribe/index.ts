@@ -246,9 +246,24 @@ async function callGemini(
   }
 
   const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  // 2.5-pro returns thinking tokens as earlier parts; find the first real text part
+  const parts: Array<{ text?: string; thought?: boolean }> =
+    data?.candidates?.[0]?.content?.parts ?? [];
+  const textPart = parts.find((p) => typeof p.text === "string" && !p.thought);
+  const finishReason = data?.candidates?.[0]?.finishReason ?? "none";
+
+  // STOP with no text parts = Gemini saw the image but found nothing to transcribe (blank/empty crop)
+  if (!textPart && finishReason === "STOP") {
+    return "";
+  }
+
+  const text = textPart?.text;
   if (typeof text !== "string") {
-    throw new Error("Gemini returned unexpected response shape");
+    const blocked = data?.promptFeedback?.blockReason ?? "none";
+    const partTypes = parts.map((p) => (p.thought ? "thought" : "text")).join(",");
+    throw new Error(
+      `Gemini returned unexpected response shape. finishReason=${finishReason}, blockReason=${blocked}, partTypes=[${partTypes}]`
+    );
   }
   return text;
 }

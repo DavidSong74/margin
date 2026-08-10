@@ -44,6 +44,7 @@ interface JournalPage {
   id: string;
   pageNumber: number;
   imagePath: string;
+  originalImagePath: string | null;
   signedImageUrl: string | null;
   transcriptionText: string | null;
   transcriptionStatus: "pending" | "processing" | "done" | "failed";
@@ -71,6 +72,7 @@ const PageItem = React.memo(function PageItem({
   onOpenCorrection,
   onTextSelection,
   onCropPress,
+  onResetPress,
 }: {
   page: JournalPage;
   index: number;
@@ -83,6 +85,7 @@ const PageItem = React.memo(function PageItem({
   onOpenCorrection: (index: number) => void;
   onTextSelection?: (sel: { start: number; end: number } | null) => void;
   onCropPress?: (pageId: string, imagePath: string, signedUrl: string) => void;
+  onResetPress?: (pageId: string) => void;
 }) {
   const [zoomVisible, setZoomVisible] = useState(false);
 
@@ -157,6 +160,18 @@ const PageItem = React.memo(function PageItem({
                       <Feather name="crop" size={15} color={colors.foreground} />
                       <Text style={[styles.cropBtnText, { color: colors.foreground, fontFamily: "Inter_500Medium" }]}>
                         Crop & Re-transcribe
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                  {onResetPress && page.originalImagePath && (
+                    <TouchableOpacity
+                      style={[styles.cropBtn, { borderColor: colors.destructive }]}
+                      onPress={() => onResetPress(page.id)}
+                      activeOpacity={0.75}
+                    >
+                      <Feather name="rotate-ccw" size={15} color={colors.destructive} />
+                      <Text style={[styles.cropBtnText, { color: colors.destructive, fontFamily: "Inter_500Medium" }]}>
+                        Restore original
                       </Text>
                     </TouchableOpacity>
                   )}
@@ -345,8 +360,6 @@ export default function JournalReaderScreen() {
     pageId: string;
     imagePath: string;
     uri: string;
-    width: number;
-    height: number;
   } | null>(null);
 
   const scrollRef = useRef<FlatList<JournalPage>>(null);
@@ -361,7 +374,7 @@ export default function JournalReaderScreen() {
       const { data, error } = await supabase
         .from("pages")
         .select(
-          "id, page_number, image_path, thumbnail_path, transcription_text, transcription_status, pending_corrections, correction_count"
+          "id, page_number, image_path, original_image_path, thumbnail_path, transcription_text, transcription_status, pending_corrections, correction_count"
         )
         .eq("journal_id", journalId)
         .is("deleted_at", null)
@@ -388,6 +401,7 @@ export default function JournalReaderScreen() {
         id: r.id,
         pageNumber: r.page_number,
         imagePath: r.image_path,
+        originalImagePath: r.original_image_path ?? null,
         signedImageUrl: signedMap[r.image_path] ?? null,
         transcriptionText: r.transcription_text,
         transcriptionStatus: r.transcription_status,
@@ -767,11 +781,7 @@ export default function JournalReaderScreen() {
 
   const handleCropPress = useCallback(
     (pageId: string, imagePath: string, signedUrl: string) => {
-      Image.getSize(
-        signedUrl,
-        (width, height) => setCropState({ pageId, imagePath, uri: signedUrl, width, height }),
-        () => Alert.alert("Error", "Could not prepare image for cropping.")
-      );
+      setCropState({ pageId, imagePath, uri: signedUrl });
     },
     []
   );
@@ -792,19 +802,29 @@ export default function JournalReaderScreen() {
           encoding: FileSystem.EncodingType.Base64,
         });
 
+        // Upload to a new path (storage RLS only allows INSERT, not UPDATE)
+        const dir = imagePath.substring(0, imagePath.lastIndexOf("/") + 1);
+        const newImagePath = `${dir}cropped_${Date.now()}.jpg`;
+
         const { error: uploadErr } = await supabase.storage
           .from("journal_pages")
-          .upload(imagePath, decode(base64), { upsert: true, contentType: "image/jpeg" });
+          .upload(newImagePath, decode(base64), { contentType: "image/jpeg" });
 
         if (uploadErr) throw uploadErr;
 
         const { data: signed } = await supabase.storage
           .from("journal_pages")
-          .createSignedUrl(imagePath, 3600);
+          .createSignedUrl(newImagePath, 3600);
+
+        // Find the current page to stash its original path before overwriting
+        const currentPageData = pages.find((p) => p.id === pageId);
+        const originalPath = currentPageData?.originalImagePath ?? currentPageData?.imagePath ?? imagePath;
 
         await supabase
           .from("pages")
           .update({
+            original_image_path: originalPath,
+            image_path: newImagePath,
             transcription_text: null,
             transcription_status: "pending",
             pending_corrections: [],
@@ -817,6 +837,8 @@ export default function JournalReaderScreen() {
             p.id === pageId
               ? {
                   ...p,
+                  originalImagePath: p.originalImagePath ?? p.imagePath,
+                  imagePath: newImagePath,
                   signedImageUrl: signed?.signedUrl ?? p.signedImageUrl,
                   transcriptionText: null,
                   transcriptionStatus: "pending",
@@ -838,6 +860,66 @@ export default function JournalReaderScreen() {
     },
     [cropState]
   );
+
+  // ── Restore original image ───────────────────────────────────
+
+  const handleResetCrop = useCallback(async (pageId: string) => {
+    const page = pages.find((p) => p.id === pageId);
+    if (!page?.originalImagePath) return;
+
+    Alert.alert(
+      "Restore original?",
+      "This will replace the cropped image and re-transcribe the original photo.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Restore",
+          onPress: async () => {
+            setPages((prev) =>
+              prev.map((p) =>
+                p.id === pageId ? { ...p, transcriptionStatus: "processing" } : p
+              )
+            );
+
+            const { data: signed } = await supabase.storage
+              .from("journal_pages")
+              .createSignedUrl(page.originalImagePath!, 3600);
+
+            await supabase
+              .from("pages")
+              .update({
+                image_path: page.originalImagePath,
+                original_image_path: null,
+                transcription_text: null,
+                transcription_status: "pending",
+                pending_corrections: [],
+                correction_count: 0,
+              })
+              .eq("id", pageId);
+
+            setPages((prev) =>
+              prev.map((p) =>
+                p.id === pageId
+                  ? {
+                      ...p,
+                      imagePath: page.originalImagePath!,
+                      originalImagePath: null,
+                      signedImageUrl: signed?.signedUrl ?? p.signedImageUrl,
+                      transcriptionText: null,
+                      transcriptionStatus: "pending",
+                      pendingCorrections: [],
+                      correctionCount: 0,
+                    }
+                  : p
+              )
+            );
+
+            await supabase.functions.invoke("transcribe", { body: { page_id: pageId } });
+          },
+        },
+      ]
+    );
+  }, [pages]);
 
   // ── Per-journal privacy toggle ───────────────────────────────
 
@@ -1046,9 +1128,10 @@ export default function JournalReaderScreen() {
         onOpenCorrection={openCorrectionModal}
         onTextSelection={handleTextSelection}
         onCropPress={handleCropPress}
+        onResetPress={handleResetCrop}
       />
     ),
-    [effectiveW, editMode, contentView, colors, matchingPageIndices, updatePageText, openCorrectionModal, handleTextSelection, handleCropPress]
+    [effectiveW, editMode, contentView, colors, matchingPageIndices, updatePageText, openCorrectionModal, handleTextSelection, handleCropPress, handleResetCrop]
   );
 
   // ── Computed values ──────────────────────────────────────────
@@ -1735,8 +1818,6 @@ export default function JournalReaderScreen() {
         {cropState && (
           <CropEditor
             uri={cropState.uri}
-            imageWidth={cropState.width}
-            imageHeight={cropState.height}
             onCrop={handleCropResult}
             onCancel={() => setCropState(null)}
           />
