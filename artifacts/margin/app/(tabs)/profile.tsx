@@ -734,7 +734,7 @@ export default function ProfileScreen() {
       const paths = pages.map((p) => p.image_path).filter(Boolean);
       const { data: signedList } = await supabase.storage
         .from("journal_pages")
-        .createSignedUrls(paths, 300);
+        .createSignedUrls(paths, 3600);
 
       const signedMap: Record<string, string> = Object.fromEntries(
         (signedList ?? []).map((s) => [s.path, s.signedUrl])

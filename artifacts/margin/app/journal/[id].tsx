@@ -591,10 +591,10 @@ export default function JournalReaderScreen() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", async (nextState) => {
       if (nextState !== "active") return;
-      if (!pages.length) return;
+      if (!pagesRef.current.length) return;
 
       // Re-generate signed URLs for all current page image paths
-      const imagePaths = pages.map((p) => p.imagePath).filter(Boolean);
+      const imagePaths = pagesRef.current.map((p) => p.imagePath).filter(Boolean);
       if (!imagePaths.length) return;
 
       const { data: signed } = await supabase.storage
@@ -615,7 +615,7 @@ export default function JournalReaderScreen() {
     });
 
     return () => sub.remove();
-  }, [pages]);
+  }, []);
 
   // ── O5: Transcription stuck detection + recovery ─────────────
   useEffect(() => {
