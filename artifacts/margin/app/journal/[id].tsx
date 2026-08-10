@@ -839,7 +839,7 @@ export default function JournalReaderScreen() {
                   ...p,
                   originalImagePath: p.originalImagePath ?? p.imagePath,
                   imagePath: newImagePath,
-                  signedImageUrl: signed?.signedUrl ?? p.signedImageUrl,
+                  signedImageUrl: signed?.signedUrl ?? p.signedImageUrl ?? null,
                   transcriptionText: null,
                   transcriptionStatus: "pending",
                   pendingCorrections: [],
@@ -888,7 +888,7 @@ export default function JournalReaderScreen() {
             await supabase
               .from("pages")
               .update({
-                image_path: page.originalImagePath,
+                image_path: page.originalImagePath!,
                 original_image_path: null,
                 transcription_text: null,
                 transcription_status: "pending",
@@ -904,7 +904,7 @@ export default function JournalReaderScreen() {
                       ...p,
                       imagePath: page.originalImagePath!,
                       originalImagePath: null,
-                      signedImageUrl: signed?.signedUrl ?? p.signedImageUrl,
+                      signedImageUrl: signed?.signedUrl ?? p.signedImageUrl ?? null,
                       transcriptionText: null,
                       transcriptionStatus: "pending",
                       pendingCorrections: [],

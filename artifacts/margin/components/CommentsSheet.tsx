@@ -31,6 +31,35 @@ interface Props {
   onClose: () => void;
 }
 
+const CommentItem = React.memo(function CommentItem({
+  item,
+  colors,
+}: {
+  item: Comment;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={styles.commentRow}>
+      <Text
+        style={[
+          styles.commentAuthor,
+          { color: colors.primary, fontFamily: "Inter_600SemiBold" },
+        ]}
+      >
+        {item.author_email}
+      </Text>
+      <Text
+        style={[
+          styles.commentText,
+          { color: colors.foreground, fontFamily: "Inter_400Regular" },
+        ]}
+      >
+        {item.comment_text}
+      </Text>
+    </View>
+  );
+});
+
 export function CommentsSheet({ entryId, onClose }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -54,6 +83,15 @@ export function CommentsSheet({ entryId, onClose }: Props) {
         setLoading(false);
       });
   }, [entryId]);
+
+  // ⚡ Bolt Performance Optimization:
+  // Extracted inline list item into React.memo() wrapped CommentItem and memoized renderItem.
+  // This prevents all comment rows from re-rendering on every keystroke when typing a new comment.
+  // Impact: Greatly improves text input responsiveness, especially on long comment threads.
+  const renderItem = React.useCallback(
+    ({ item }: { item: Comment }) => <CommentItem item={item} colors={colors} />,
+    [colors]
+  );
 
   async function handleSend() {
     const text = newText.trim();
@@ -147,26 +185,7 @@ export function CommentsSheet({ entryId, onClose }: Props) {
                   No comments yet. Be the first!
                 </Text>
               }
-              renderItem={({ item }) => (
-                <View style={styles.commentRow}>
-                  <Text
-                    style={[
-                      styles.commentAuthor,
-                      { color: colors.primary, fontFamily: "Inter_600SemiBold" },
-                    ]}
-                  >
-                    {item.author_email}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.commentText,
-                      { color: colors.foreground, fontFamily: "Inter_400Regular" },
-                    ]}
-                  >
-                    {item.comment_text}
-                  </Text>
-                </View>
-              )}
+              renderItem={renderItem}
             />
           )}
 
