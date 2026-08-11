@@ -357,10 +357,17 @@ export default function CaptureScreen() {
     setBatchProgress({ current: 0, total: result.assets.length });
 
     try {
-      for (let i = 0; i < result.assets.length; i++) {
-        setBatchProgress({ current: i + 1, total: result.assets.length });
-        await uploadSinglePhoto(result.assets[i].uri, base + i, user);
-      }
+      let completedCount = 0;
+      // ⚡ Bolt: Upload batch of photos concurrently using Promise.all instead of sequentially
+      // awaiting each inside a for loop. This eliminates the N+1 upload bottleneck, drastically
+      // reducing total upload time for multiple files.
+      await Promise.all(
+        result.assets.map(async (asset, index) => {
+          await uploadSinglePhoto(asset.uri, base + index, user);
+          completedCount++;
+          setBatchProgress({ current: completedCount, total: result.assets.length });
+        })
+      );
       router.replace({ pathname: "/journal/[id]", params: { id: journal_id } });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Upload failed";
