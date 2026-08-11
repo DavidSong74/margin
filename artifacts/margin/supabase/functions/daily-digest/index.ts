@@ -72,8 +72,8 @@ Deno.serve(async (req: Request) => {
 
     // Pick the first non-empty snippet (first ~80 chars)
     const snippet = pages
-      .map((p) => (p.transcription_text ?? "").trim())
-      .find((t) => t.length > 10);
+      .map((p: any) => (p.transcription_text ?? "").trim())
+      .find((t: any) => t.length > 10);
 
     if (!snippet) continue;
 
