@@ -1,0 +1,45 @@
+Build the journal page-reader screen for the same journaling app.
+
+IMPORTANT: Match the EXACT design system from the existing screens in this project — same
+cream/paper background, sage-green accent, serif for headings/titles, clean sans-serif for UI,
+soft rounded corners and gentle shadows. This is the same app's interior; keep it consistent.
+
+WHAT THIS SCREEN IS:
+The view a user lands on after tapping a journal cover. It shows the pages of ONE journal. Users
+swipe horizontally through pages like a book. There's an Edit toggle: when OFF (default) it's a
+calm read mode; when ON, the page text becomes editable and a camera button appears to add a new
+page by photo. UI only — mock data, mock all actions (console.log), no backend.
+
+LAYOUT (mobile-first, ~390px):
+- Header: a back arrow (to the library) on the left; the journal's name centered in serif; on the
+  right, an Edit toggle (a clear on/off switch labeled "Edit").
+- Below the header, a page counter, e.g. "Page 3 of 42".
+- Main area: the current page's content (see below), taking most of the screen.
+- Horizontal swipe (and left/right chevron buttons) to move between pages. Show small page dots or
+  the counter as the position indicator.
+
+PAGE CONTENT — READ MODE (Edit off):
+- The transcribed text of the page, beautifully typeset and comfortably readable — generous line
+  height, comfortable measure, slightly warm text color. Scroll vertically if the page is long.
+- A subtle toggle at the top of the content area: "Transcription | Original" that flips between the
+  digital text and the photographed original page (mock the original with a placeholder image of a
+  handwritten page). Default to Transcription.
+- If a page has unreviewed text, show a small sage badge like "3 to review" that (mock) links to the
+  review queue.
+
+PAGE CONTENT — EDIT MODE (Edit on):
+- The transcribed text becomes editable in place (a clean, paper-styled text area — no harsh borders).
+- A floating camera/“+” button appears: "Add page from photo" (mock → console.log, this will later
+  open the capture screen).
+- A "Done" affordance to leave edit mode.
+
+SAMPLE DATA:
+3–4 pages of realistic journal prose so swiping is demonstrable. Make one page longer (to show
+scrolling) and give one page the "to review" badge.
+
+TECHNICAL:
+- React functional component, Tailwind CSS, shadcn/ui where it fits.
+- Manage current page index, edit on/off, and transcription/original toggle in React state.
+- Smooth swipe/transition between pages; accessible (labelled controls, focus states, keyboard
+  arrows to navigate pages, alt text on the original image).
+- Self-contained in one file.

@@ -1,0 +1,44 @@
+Build the home screen for the same journaling app — the journal library ("shelf").
+
+IMPORTANT: Match the EXACT design system from the existing login screen already in this project —
+same cream/paper background, same sage-green accent, same serif for headings/titles and clean
+sans-serif for UI text, same soft rounded corners and gentle shadows. This screen is the interior
+of the same app; it must feel like the login screen's sibling.
+
+WHAT THIS SCREEN IS:
+The first thing a user sees after logging in. It shows all of their journals as a grid of book-like
+covers, each with a customizable name, plus a way to add a new journal. UI only — use mock data,
+mock all navigation (console.log on tap), no backend.
+
+LAYOUT (mobile-first, ~390px):
+- Top bar: a small "Margin" wordmark on the left, and a circular profile/avatar button on the right.
+- Beneath it, a warm greeting in serif, e.g. "Your shelf" or "Welcome back, Sarah".
+- A search bar below the greeting (icon + "Search your journals…") — mock only, but make it prominent,
+  since search is a core feature.
+- The main area: a 2-column grid of journal covers.
+- A bottom tab bar with 4 tabs: Library (active), Search, Review, Profile — use simple line icons.
+
+JOURNAL COVERS (the centerpiece — make these feel special):
+- Each cover is a book-like card in portrait orientation (roughly 3:4 aspect ratio).
+- Give each a subtle "book" feel: a slightly darker spine/binding edge down one side and a soft shadow,
+  so the grid reads like a little bookshelf.
+- Two cover styles, mixed in the sample data:
+  (a) image covers — a photo fills the cover with the title overlaid in serif on a subtle scrim;
+  (b) solid covers — a warm solid color (varied muted tones) with the title centered in serif.
+- Below or on each cover: the journal's custom name, and a small subtitle like "42 pages · edited 3d ago".
+- Include a "+ New journal" tile styled as a dashed-outline card matching the cover size, as the
+  first item in the grid.
+
+SAMPLE DATA:
+Populate with 5–6 journals with varied names and cover styles (e.g. "Morning Pages", "Travel 2019",
+"Dream Journal", "Work Notes", "Letters to Mom") so the populated layout is visible.
+
+EMPTY STATE:
+Also handle the no-journals case: a centered, friendly illustration-or-icon + "Start your first journal"
+prompt with a button. (You can put this behind a toggle/prop so I can preview both states.)
+
+TECHNICAL:
+- React functional component, Tailwind CSS, shadcn/ui where it fits.
+- Responsive (center the grid in a max-width column on larger screens), accessible (labelled buttons,
+  focus states, keyboard nav, alt text on cover images).
+- All state in React; self-contained in one file.

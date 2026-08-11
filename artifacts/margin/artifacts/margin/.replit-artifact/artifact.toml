@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "Margin"
+version = "1.0.0"
+id = "artifacts/margin"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 24420
+
+[services.development]
+run = "pnpm --filter @workspace/margin run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/margin", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/margin", "run", "serve" ]
+
+[services.env]
+PORT = "24420"
+BASE_PATH = "/"

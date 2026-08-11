@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "2LHqIM3RG--Q4MHY7ucKR"
+uri = "file://artifacts/margin/assets/images/icon.png"
+type = "image"
+title = "generated_image"

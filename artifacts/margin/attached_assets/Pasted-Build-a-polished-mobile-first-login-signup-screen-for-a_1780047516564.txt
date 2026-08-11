@@ -1,0 +1,54 @@
+Build a polished, mobile-first login / signup screen for a personal journaling app.
+
+ABOUT THE APP (for design context):
+The app lets people photograph pages of their old handwritten journals and turns them into
+a searchable, beautiful digital archive they can revisit. The feeling is warm, personal, and
+calm — like opening a cherished notebook, not logging into a corporate dashboard.
+
+SCREEN GOAL:
+A single auth screen that handles both Log In and Sign Up, with a toggle between the two modes.
+This is UI only for now — mock the submit action (fake 1.5s delay, then console.log the values).
+Do not build any other screens or navigation.
+
+LAYOUT:
+- Mobile-first: design for a ~390px phone width first, but center it in a clean card on larger screens.
+- A wordmark / app name at the top (use the placeholder name "Margin") with a short evocative
+  tagline beneath it, e.g. "Carry every journal you've ever kept."
+- Below that, the auth form in a soft card.
+- Generous whitespace, uncluttered, calm.
+
+FORM — LOG IN mode:
+- Email field
+- Password field (with a show/hide toggle)
+- "Forgot password?" link, right-aligned
+- Primary button: "Log in"
+
+FORM — SIGN UP mode:
+- Name field (optional)
+- Email field
+- Password field (with show/hide and a minimum-8-character hint)
+- Confirm password field
+- Primary button: "Create account"
+
+SHARED:
+- A clear way to switch modes, e.g. footer text "New here? Create an account" / "Already have an
+  account? Log in" that toggles the form.
+- A divider ("or"), then social buttons: "Continue with Google" and "Continue with Apple".
+- Inline validation: valid email format, password length, and (signup) matching passwords.
+  Show friendly inline error messages, not alerts.
+- While submitting: disable the button and show a small spinner.
+
+VISUAL DESIGN (this is important — make it feel distinctive, not a default template):
+- Warm, paper-like palette: a cream / off-white background, soft warm neutrals, and ONE muted
+  accent color (sage green or dusty terracotta — pick one and use it for buttons and links).
+- An elegant serif typeface for the wordmark and headings (evokes books / handwriting); a clean,
+  readable sans-serif for inputs and body text.
+- Soft rounded corners, gentle shadows, subtle texture or a very soft gradient on the background.
+- Smooth, understated micro-interactions on focus and button hover. Nothing flashy.
+
+TECHNICAL:
+- React functional component, Tailwind CSS. Use shadcn/ui components where they fit.
+- Fully responsive and accessible: proper labels, visible focus states, keyboard navigation, aria
+  attributes on the password toggle and error messages.
+- Manage the login/signup toggle and all form fields with React state.
+- Self-contained in one file.
