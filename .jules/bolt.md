@@ -1,0 +1,3 @@
+## 2024-08-11 - Memoizing Derived Data for React.memo in FlatList
+**Learning:** If a component is wrapped in `React.memo` (like `LibraryGridItem`), its props must maintain stable object references to prevent unnecessary re-renders. In `artifacts/margin/app/(tabs)/index.tsx`, `gridData` was re-created on every render (even when just focusing the search input), causing the entire `FlatList` to re-render all items because the `item` prop passed to `LibraryGridItem` was a newly allocated object each time.
+**Action:** Always `useMemo` for derived data arrays and objects passed as props to memoized components, especially for list data in `FlatList`.
