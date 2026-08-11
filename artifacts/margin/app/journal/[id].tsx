@@ -988,7 +988,7 @@ export default function JournalReaderScreen() {
             await supabase
               .from("pages")
               .update({
-                image_path: page.originalImagePath,
+                image_path: page.originalImagePath ?? undefined,
                 original_image_path: null,
                 transcription_text: null,
                 transcription_status: "pending",
