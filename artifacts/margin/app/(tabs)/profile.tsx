@@ -692,12 +692,16 @@ export default function ProfileScreen() {
         return;
       }
 
-      let content = "Margin — Journal Export\n";
-      content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
+      // ⚡ Bolt: Optimize string concatenation for Hermes engine by using an array to avoid reallocation overhead.
+      const contentParts = [
+        "Margin — Journal Export\n",
+        `Exported: ${new Date().toLocaleDateString()}\n\n`
+      ];
       for (const page of pages) {
-        content += `--- Page ${page.page_number} ---\n`;
-        content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
+        contentParts.push(`--- Page ${page.page_number} ---\n`);
+        contentParts.push((page.transcription_text ?? "(no transcription yet)") + "\n\n");
       }
+      const content = contentParts.join("");
 
       const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? "";
       const filePath = dir + "margin_export.txt";
@@ -744,20 +748,30 @@ export default function ProfileScreen() {
       const exportDir = (FileSystem.cacheDirectory ?? "") + "margin_export/";
       await FileSystem.makeDirectoryAsync(exportDir, { intermediates: true });
 
-      for (const page of pages) {
-        const signedUrl = signedMap[page.image_path];
-        if (!signedUrl) continue;
-        const dest = `${exportDir}page_${String(page.page_number).padStart(3, "0")}.jpg`;
-        await FileSystem.downloadAsync(signedUrl, dest);
+      // ⚡ Bolt: Use Promise.all for concurrent downloads to prevent N+1 blocking bottlenecks, with a concurrency limit.
+      const CONCURRENCY_LIMIT = 5;
+      for (let i = 0; i < pages.length; i += CONCURRENCY_LIMIT) {
+        const batch = pages.slice(i, i + CONCURRENCY_LIMIT);
+        const downloadPromises = batch.map((page) => {
+          const signedUrl = signedMap[page.image_path];
+          if (!signedUrl) return Promise.resolve();
+          const dest = `${exportDir}page_${String(page.page_number).padStart(3, "0")}.jpg`;
+          return FileSystem.downloadAsync(signedUrl, dest);
+        });
+        await Promise.all(downloadPromises);
       }
 
       // Write transcript alongside the images
-      let content = "Margin — Journal Export\n";
-      content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
+      // ⚡ Bolt: Optimize string concatenation for Hermes engine by using an array to avoid reallocation overhead.
+      const contentParts = [
+        "Margin — Journal Export\n",
+        `Exported: ${new Date().toLocaleDateString()}\n\n`
+      ];
       for (const page of pages) {
-        content += `--- Page ${page.page_number} ---\n`;
-        content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
+        contentParts.push(`--- Page ${page.page_number} ---\n`);
+        contentParts.push((page.transcription_text ?? "(no transcription yet)") + "\n\n");
       }
+      const content = contentParts.join("");
       await FileSystem.writeAsStringAsync(exportDir + "transcriptions.txt", content);
 
       if (await Sharing.isAvailableAsync()) {
