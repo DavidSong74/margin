@@ -1,0 +1,3 @@
+## 2024-08-12 - [Hermes Engine String Concatenation & Concurrent Loops]
+**Learning:** In React Native's Hermes engine, building large strings in a loop using the `+=` operator can incur significant string reallocation performance overhead. Additionally, awaiting file I/O sequentially inside a loop creates an N+1 blocking bottleneck, but unbounded `Promise.all` can cause memory spikes and network queue issues.
+**Action:** Always prefer pushing string fragments to an array and using `.join('')` to combine them. Use `Promise.all()` with chunking (e.g., concurrency limit of 5-10) to parallelize async operations like file downloads across collections without overwhelming the device.
