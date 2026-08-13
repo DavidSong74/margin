@@ -692,12 +692,17 @@ export default function ProfileScreen() {
         return;
       }
 
-      let content = "Margin — Journal Export\n";
-      content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
+      // Optimization: use array join to prevent excessive memory reallocation on the mobile Hermes engine
+      const contentLines = [
+        "Margin — Journal Export",
+        `Exported: ${new Date().toLocaleDateString()}`,
+        "" // Add extra newline
+      ];
       for (const page of pages) {
-        content += `--- Page ${page.page_number} ---\n`;
-        content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
+        contentLines.push(`--- Page ${page.page_number} ---`);
+        contentLines.push((page.transcription_text ?? "(no transcription yet)") + "\n");
       }
+      const content = contentLines.join('\n');
 
       const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? "";
       const filePath = dir + "margin_export.txt";
@@ -752,12 +757,18 @@ export default function ProfileScreen() {
       }
 
       // Write transcript alongside the images
-      let content = "Margin — Journal Export\n";
-      content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
+      // Optimization: use array join to prevent excessive memory reallocation on the mobile Hermes engine
+      const contentLines = [
+        "Margin — Journal Export",
+        `Exported: ${new Date().toLocaleDateString()}`,
+        "" // Add extra newline
+      ];
       for (const page of pages) {
-        content += `--- Page ${page.page_number} ---\n`;
-        content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
+        contentLines.push(`--- Page ${page.page_number} ---`);
+        contentLines.push((page.transcription_text ?? "(no transcription yet)") + "\n");
       }
+      const content = contentLines.join('\n');
+
       await FileSystem.writeAsStringAsync(exportDir + "transcriptions.txt", content);
 
       if (await Sharing.isAvailableAsync()) {
