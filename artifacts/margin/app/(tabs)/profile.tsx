@@ -29,6 +29,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useTheme, type ThemeOption } from "@/hooks/useTheme";
 import { supabase } from "@/lib/supabase";
+import { COVER_COLORS } from "@/constants/colors";
 
 // ─── Reusable primitives ─────────────────────────────────────────────────────
 
@@ -278,15 +279,6 @@ function ThemeRow({ value, onChange }: { value: ThemeOption; onChange: (v: Theme
 
 // ─── Cover color picker ───────────────────────────────────────────────────────
 
-const COVER_COLORS = [
-  "#c8b89a",
-  "#a8b8a0",
-  "#b8b0c8",
-  "#b8c4b0",
-  "#c0a898",
-  "#a8b0b8",
-];
-
 function CoverColorRow({
   value,
   onChange,
@@ -315,18 +307,18 @@ function CoverColorRow({
           <View style={styles.swatchRow}>
             {COVER_COLORS.map((c) => (
               <TouchableOpacity
-                key={c}
+                key={c.hex}
                 style={[
                   styles.swatch,
-                  { backgroundColor: c },
-                  value === c && {
+                  { backgroundColor: c.hex },
+                  value === c.hex && {
                     borderWidth: 2.5,
                     borderColor: colors.primary,
                   },
                 ]}
                 onPress={() => {
                   Haptics.selectionAsync();
-                  onChange(c);
+                  onChange(c.hex);
                 }}
               />
             ))}
@@ -443,7 +435,7 @@ const DEFAULT_PREFS: Prefs = {
   iCloudBackup: true,
   driveBackup: false,
   appLock: false,
-  coverColor: COVER_COLORS[0],
+  coverColor: COVER_COLORS[0].hex,
   transcriptionQuality: "balanced",
   reminderHour: 21,
   reminderMinute: 0,

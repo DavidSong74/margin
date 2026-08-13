@@ -1,5 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
+import { decode } from "base64-arraybuffer";
 import { useFocusEffect, router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -22,6 +24,8 @@ import { InboxOverlay } from "@/components/InboxOverlay";
 import { useColors } from "@/hooks/useColors";
 import { supabase } from "@/lib/supabase";
 import type { Database } from "@/lib/database.types";
+import { COVER_COLORS } from "@/constants/colors";
+import { DatePicker } from "@quidone/react-native-wheel-picker";
 
 const H_PAD = 20;
 const COL_GAP = 12;
@@ -368,6 +372,7 @@ export default function LibraryScreen() {
   const [editTitleText, setEditTitleText] = useState("");
   const [editingTitle, setEditingTitle] = useState(false);
   const [savingAction, setSavingAction] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // S2: Inbox overlay
   const [inboxVisible, setInboxVisible] = useState(false);
@@ -561,7 +566,6 @@ export default function LibraryScreen() {
   }, [menuJournal, editTitleText, closeMenu]);
 
   // Change cover color
-  const COVER_COLORS = ["#c8b89a", "#a8b8a0", "#b8b0c8", "#b8c4b0", "#c0a898", "#a8b0b8"];
   const handleChangeCoverColor = useCallback(async (hex: string) => {
     if (!menuJournal) return;
     await supabase.from("journals").update({ cover_style: "solid", cover_color: hex }).eq("id", menuJournal.id);
@@ -569,28 +573,56 @@ export default function LibraryScreen() {
     closeMenu();
   }, [menuJournal, closeMenu]);
 
-  // Change date
-  const handleChangeDate = useCallback(() => {
+  // Change cover picture
+  const handleChangeCoverPicture = useCallback(async () => {
     if (!menuJournal) return;
-    const current = menuJournal.createdAt.slice(0, 10);
-    Alert.prompt(
-      "Change date",
-      "Enter the date in YYYY-MM-DD format (e.g. 2023-06-15).",
-      async (input) => {
-        if (!input) return;
-        const parsed = new Date(input);
-        if (isNaN(parsed.getTime())) {
-          Alert.alert("Invalid date", "Please use YYYY-MM-DD format.");
-          return;
-        }
-        const iso = parsed.toISOString();
-        await supabase.from("journals").update({ created_at: iso }).eq("id", menuJournal.id);
-        setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { ...j, createdAt: iso } : j));
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Permission Required", "Photo library access is required to choose a cover photo.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [3, 4],
+      quality: 0.7,
+    });
+    if (!result.canceled) {
+      setSavingAction(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) throw new Error("Not authenticated");
+        
+        const FileSystem = await import("expo-file-system/legacy");
+        const base64 = await FileSystem.readAsStringAsync(result.assets[0].uri, { encoding: "base64" });
+        const storagePath = `${session.user.id}/${menuJournal.id}/cover.jpg`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from("covers")
+          .upload(storagePath, decode(base64), {
+            contentType: "image/jpeg",
+            upsert: true,
+          });
+        if (uploadError) throw uploadError;
+
+        await supabase.from("journals").update({ 
+          cover_style: "image", 
+          cover_image_url: storagePath 
+        }).eq("id", menuJournal.id);
+        
+        setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { 
+          ...j, 
+          coverStyle: "image", 
+          coverImagePath: storagePath,
+          coverImage: undefined
+        } : j));
+      } catch (err) {
+        Alert.alert("Upload Failed", err instanceof Error ? err.message : "Something went wrong.");
+      } finally {
+        setSavingAction(false);
         closeMenu();
-      },
-      "plain-text",
-      current
-    );
+      }
+    }
   }, [menuJournal, closeMenu]);
 
   // Toggle lock
@@ -887,27 +919,39 @@ export default function LibraryScreen() {
                 Cover color
               </Text>
               <View style={styles.sheetSwatchRow}>
-                {COVER_COLORS.map((hex) => (
+                {COVER_COLORS.map((c) => (
                   <TouchableOpacity
-                    key={hex}
+                    key={c.hex}
                     style={[
                       styles.sheetSwatch,
-                      { backgroundColor: hex },
-                      menuJournal.coverColor === hex && {
+                      { backgroundColor: c.hex },
+                      menuJournal.coverColor === c.hex && {
                         borderWidth: 2.5,
                         borderColor: colors.primary,
                       },
                     ]}
-                    onPress={() => handleChangeCoverColor(hex)}
+                    onPress={() => handleChangeCoverColor(c.hex)}
                   />
                 ))}
               </View>
             </View>
+            
+            <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
+
+            <TouchableOpacity style={styles.sheetRow} onPress={handleChangeCoverPicture}>
+              <Feather name="image" size={18} color={colors.primary} />
+              <Text style={[styles.sheetRowLabel, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
+                Choose from Photos
+              </Text>
+            </TouchableOpacity>
 
             <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
 
             {/* ── Change date ── */}
-            <TouchableOpacity style={styles.sheetRow} onPress={handleChangeDate}>
+            <TouchableOpacity 
+              style={styles.sheetRow} 
+              onPress={() => setShowDatePicker((p) => !p)}
+            >
               <Feather name="calendar" size={18} color={colors.primary} />
               <Text style={[styles.sheetRowLabel, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
                 Change date
@@ -916,6 +960,41 @@ export default function LibraryScreen() {
                 {formatDate(menuJournal.createdAt)}
               </Text>
             </TouchableOpacity>
+
+            {showDatePicker && (
+              <View style={{ marginHorizontal: 20, marginBottom: 16 }}>
+                <View style={{ height: 180 }}>
+                  <DatePicker
+                    date={menuJournal.createdAt.slice(0, 10)}
+                    onDateChanged={async ({ date }) => {
+                      if (!date) return;
+                      Haptics.selectionAsync();
+                      const parsed = new Date(date);
+                      if (isNaN(parsed.getTime())) return;
+                      const iso = parsed.toISOString();
+                      await supabase.from("journals").update({ created_at: iso }).eq("id", menuJournal.id);
+                      setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { ...j, createdAt: iso } : j));
+                    }}
+                    itemTextStyle={{ color: colors.foreground, fontFamily: "Inter_400Regular", fontSize: 16 }}
+                    overlayItemStyle={{ backgroundColor: colors.border, opacity: 0.5, borderRadius: 8 }}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: colors.primary,
+                    paddingVertical: 12,
+                    borderRadius: 8,
+                    alignItems: "center",
+                    marginTop: 12,
+                  }}
+                  onPress={() => setShowDatePicker(false)}
+                >
+                  <Text style={{ color: colors.primaryForeground, fontFamily: "Inter_600SemiBold", fontSize: 15 }}>
+                    Done
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
 

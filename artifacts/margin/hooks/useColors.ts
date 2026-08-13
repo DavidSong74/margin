@@ -9,7 +9,7 @@ export function useColors() {
   const systemScheme = useColorScheme();
 
   const resolved = theme === "system" ? systemScheme : theme;
-  
+
   return useMemo(() => {
     const palette = resolved === "dark" && colors.dark ? colors.dark : colors.light;
     return { ...palette, radius: colors.radius };

@@ -55,6 +55,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "dependencies": {
+    "@quidone/react-native-wheel-picker": "^1.7.1",
     "@supabase/supabase-js": "^2.49.8",
     "base64-arraybuffer": "^1.0.2",
     "expo-camera": "^17.0.10",

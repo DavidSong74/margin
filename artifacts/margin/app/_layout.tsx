@@ -20,7 +20,7 @@ import * as SplashScreen from "expo-splash-screen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as LocalAuthentication from "expo-local-authentication";
 import React, { useEffect, useState } from "react";
-import { AppState, type AppStateStatus, View } from "react-native";
+import { AppState, type AppStateStatus, View, LogBox } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -29,6 +29,8 @@ import { supabase } from "@/lib/supabase";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { useColors } from "@/hooks/useColors";
 import { processCaptureQueue } from "@/lib/captureQueue";
+
+LogBox.ignoreLogs(["expo-notifications: Android Push notifications"]);
 
 SplashScreen.preventAutoHideAsync();
 
@@ -106,7 +108,7 @@ function NavigationGuard({
     if (!initialized) return;
     const inTabs = segments[0] === "(tabs)";
     // Auth screen has no named segment. Any known authenticated route is NOT the auth screen.
-    const onAuthenticatedRoute = inTabs || segments[0] === "journal" || segments[0] === "capture" || segments[0] === "glossary" || segments[0] === "deleted-pages";
+    const onAuthenticatedRoute = inTabs || segments[0] === "journal" || segments[0] === "capture" || segments[0] === "glossary" || segments[0] === "deleted-pages" || segments[0] === "deleted-journals";
     if (session && !onAuthenticatedRoute) {
       router.replace("/(tabs)");
     } else if (!session && inTabs) {
@@ -133,6 +135,7 @@ function RootLayoutNav({
         <Stack.Screen name="journal/[id]" />
         <Stack.Screen name="glossary" />
         <Stack.Screen name="deleted-pages" />
+        <Stack.Screen name="deleted-journals" />
         <Stack.Screen
           name="journal/new"
           options={{ presentation: "modal", animation: "slide_from_bottom" }}
@@ -193,7 +196,7 @@ export default function RootLayout() {
   useEffect(() => {
     const sub = AppState.addEventListener("change", (nextState: AppStateStatus) => {
       if (nextState === "active") {
-        processCaptureQueue().catch(() => {});
+        processCaptureQueue().catch(() => { });
       }
     });
     return () => sub.remove();

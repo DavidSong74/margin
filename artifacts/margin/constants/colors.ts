@@ -62,3 +62,12 @@ const colors = {
 };
 
 export default colors;
+
+export const COVER_COLORS = [
+  { id: "sand", name: "Sand", hex: "#c8b89a" },
+  { id: "sage", name: "Sage", hex: "#a8b8a0" },
+  { id: "lavender", name: "Lavender", hex: "#b8b0c8" },
+  { id: "mint", name: "Mint", hex: "#b8c4b0" },
+  { id: "rose", name: "Rose", hex: "#c0a898" },
+  { id: "slate", name: "Slate", hex: "#a8b0b8" },
+];

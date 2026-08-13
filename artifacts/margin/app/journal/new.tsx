@@ -20,23 +20,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { supabase } from "@/lib/supabase";
+import { COVER_COLORS } from "@/constants/colors";
 
 // ── Constants ───────────────────────────────────────────────
 
 const TITLE_MAX = 60;
 const H_PAD = 20;
 const SWATCH_GAP = 12;
-
-const COVER_COLORS = [
-  { id: "sand", hex: "#c8b89a" },
-  { id: "taupe", hex: "#b8a898" },
-  { id: "sage", hex: "#a8b8a0" },
-  { id: "lavender", hex: "#b8b0c8" },
-  { id: "terra", hex: "#c4a090" },
-  { id: "slate", hex: "#98a8b8" },
-  { id: "olive", hex: "#b0b898" },
-  { id: "mauve", hex: "#a89898" },
-] as const;
 
 // ── Screen ──────────────────────────────────────────────────
 
