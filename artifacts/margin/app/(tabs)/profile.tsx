@@ -5,6 +5,7 @@ import * as Haptics from "expo-haptics";
 import * as Notifications from "expo-notifications";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Sharing from "expo-sharing";
+import Constants from "expo-constants";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -14,6 +15,7 @@ import {
   Linking,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -339,23 +341,24 @@ function CoverColorRow({
 
 function StorageRow() {
   const colors = useColors();
-  const [usedBytes, setUsedBytes] = useState<number | null>(null);
-  const TOTAL_GB = 15;
+  const [usedBytes, setUsedBytes]   = useState<number | null>(null);
+  const [limitBytes, setLimitBytes] = useState<number>(15 * 1024 ** 3);
 
   useEffect(() => {
-    supabase
-      .rpc("get_user_storage_bytes")
-      .then(({ data }) => {
-        if (data !== null && data !== undefined) {
-          setUsedBytes(data as number);
-        }
-      });
+    supabase.rpc("get_storage_info").then(({ data }) => {
+      if (!data) return;
+      setUsedBytes((data as { used_bytes: number; limit_bytes: number }).used_bytes);
+      setLimitBytes((data as { used_bytes: number; limit_bytes: number }).limit_bytes);
+    });
   }, []);
 
-  const usedGB = usedBytes !== null ? usedBytes / (1024 ** 3) : null;
+  const BYTES_PER_GB = 1024 ** 3;
+  const usedGB = usedBytes !== null ? usedBytes / BYTES_PER_GB : null;
+  const limitGB = limitBytes / BYTES_PER_GB;
+
   const displayUsed = usedGB !== null ? usedGB.toFixed(2) : "…";
-  const pct = usedGB !== null ? Math.min(usedGB / TOTAL_GB, 1) : 0;
-  const available = usedGB !== null ? (TOTAL_GB - usedGB).toFixed(1) : "…";
+  const pct = usedGB !== null ? Math.min(usedGB / limitGB, 1) : 0;
+  const available = usedGB !== null ? (limitGB - usedGB).toFixed(1) : "…";
 
   return (
     <>
@@ -381,7 +384,7 @@ function StorageRow() {
                 { color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
               ]}
             >
-              {displayUsed} GB / {TOTAL_GB} GB
+              {displayUsed} GB / {limitGB} GB
             </Text>
           </View>
           <View
@@ -554,6 +557,7 @@ export default function ProfileScreen() {
 
   // §5: Change password modal
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showDefaultsModal, setShowDefaultsModal] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
 
@@ -692,12 +696,15 @@ export default function ProfileScreen() {
         return;
       }
 
-      let content = "Margin — Journal Export\n";
-      content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
+      const contentLines = [
+        "Margin — Journal Export",
+        `Exported: ${new Date().toLocaleDateString()}\n`,
+      ];
       for (const page of pages) {
-        content += `--- Page ${page.page_number} ---\n`;
-        content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
+        contentLines.push(`--- Page ${page.page_number} ---`);
+        contentLines.push((page.transcription_text ?? "(no transcription yet)") + "\n");
       }
+      const content = contentLines.join("\n");
 
       const dir = FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? "";
       const filePath = dir + "margin_export.txt";
@@ -744,20 +751,25 @@ export default function ProfileScreen() {
       const exportDir = (FileSystem.cacheDirectory ?? "") + "margin_export/";
       await FileSystem.makeDirectoryAsync(exportDir, { intermediates: true });
 
-      for (const page of pages) {
-        const signedUrl = signedMap[page.image_path];
-        if (!signedUrl) continue;
-        const dest = `${exportDir}page_${String(page.page_number).padStart(3, "0")}.jpg`;
-        await FileSystem.downloadAsync(signedUrl, dest);
-      }
+      await Promise.all(
+        pages.map(async (page) => {
+          const signedUrl = signedMap[page.image_path];
+          if (!signedUrl) return;
+          const dest = `${exportDir}page_${String(page.page_number).padStart(3, "0")}.jpg`;
+          await FileSystem.downloadAsync(signedUrl, dest);
+        })
+      );
 
       // Write transcript alongside the images
-      let content = "Margin — Journal Export\n";
-      content += `Exported: ${new Date().toLocaleDateString()}\n\n`;
+      const contentLines = [
+        "Margin — Journal Export",
+        `Exported: ${new Date().toLocaleDateString()}\n`,
+      ];
       for (const page of pages) {
-        content += `--- Page ${page.page_number} ---\n`;
-        content += (page.transcription_text ?? "(no transcription yet)") + "\n\n";
+        contentLines.push(`--- Page ${page.page_number} ---`);
+        contentLines.push((page.transcription_text ?? "(no transcription yet)") + "\n");
       }
+      const content = contentLines.join("\n");
       await FileSystem.writeAsStringAsync(exportDir + "transcriptions.txt", content);
 
       if (await Sharing.isAvailableAsync()) {
@@ -1068,7 +1080,7 @@ export default function ProfileScreen() {
           <Row
             icon="download"
             label="Export full archive"
-            value="Text / PDF"
+            value="Text / Images"
             onPress={handleExport}
           />
           <Row
@@ -1113,7 +1125,11 @@ export default function ProfileScreen() {
         {/* ── Journaling ── */}
         <SectionHeader label="Journaling" />
         <SectionCard>
-          <Row icon="settings" label="New journal defaults" />
+          <Row
+            icon="settings"
+            label="New journal defaults"
+            onPress={() => setShowDefaultsModal(true)}
+          />
           <Row
             icon="book-open"
             label="Glossary"
@@ -1123,6 +1139,11 @@ export default function ProfileScreen() {
             icon="trash-2"
             label="Deleted Pages"
             onPress={() => router.push("/deleted-pages")}
+          />
+          <Row
+            icon="book-open"
+            label="Deleted Journals"
+            onPress={() => router.push("/deleted-journals")}
           />
           <Row
             icon="cpu"
@@ -1191,18 +1212,68 @@ export default function ProfileScreen() {
             icon="message-circle"
             label="Send feedback"
             onPress={() =>
-              Linking.openURL("mailto:songdavid93374@gmail.com?subject=Margin%20Feedback")
+              Linking.openURL("mailto:hello@margin.app?subject=Margin%20Feedback")
             }
           />
           <Row
             icon="info"
             label="Version"
-            value="1.0.0"
+            value={Constants.expoConfig?.version ?? "—"}
             chevron={false}
             last
           />
         </SectionCard>
       </ScrollView>
+
+      {/* ── New journal defaults modal ── */}
+      <Modal
+        visible={showDefaultsModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowDefaultsModal(false)}
+      >
+        <View style={[styles.sheetModalRoot, { backgroundColor: colors.background }]}>
+          <View style={styles.sheetModalHeader}>
+            <Text style={[styles.sheetModalTitle, { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" }]}>
+              New journal defaults
+            </Text>
+            <Pressable onPress={() => setShowDefaultsModal(false)}>
+              <Feather name="x" size={22} color={colors.mutedForeground} />
+            </Pressable>
+          </View>
+
+          <SectionHeader label="Cover color" />
+          <CoverColorRow
+            value={coverColor}
+            onChange={(hex) => { setCoverColor(hex); savePref({ coverColor: hex }); }}
+          />
+
+          <SectionHeader label="Transcription" />
+          <Row
+            icon="cpu"
+            label="AI transcription quality"
+            value={transcriptionQuality.charAt(0).toUpperCase() + transcriptionQuality.slice(1)}
+            last
+            onPress={() => {
+              const OPTIONS = [
+                { key: "balanced" as const, label: "Balanced" },
+                { key: "best"     as const, label: "Best"     },
+              ];
+              Alert.alert(
+                "Transcription quality",
+                "Applied to all new transcriptions for journals you create.",
+                [
+                  ...OPTIONS.map((o) => ({
+                    text: o.label + (o.key === transcriptionQuality ? " ✓" : ""),
+                    onPress: () => { setTranscriptionQuality(o.key); savePref({ transcriptionQuality: o.key }); },
+                  })),
+                  { text: "Cancel", style: "cancel" as const },
+                ]
+              );
+            }}
+          />
+        </View>
+      </Modal>
 
       {/* ── §5: Change password modal ── */}
       <Modal
@@ -1422,5 +1493,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.3,
     textTransform: "uppercase",
+  },
+  sheetModalRoot: {
+    flex: 1,
+    paddingTop: 8,
+  },
+  sheetModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  sheetModalTitle: {
+    fontSize: 20,
+    letterSpacing: -0.3,
   },
 });

@@ -14,6 +14,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -64,7 +65,7 @@ export default function NewJournalScreen() {
 
   // Calculate swatch size: 4 per row with gap
   // Real width is unknown at this point, estimate 375 – 2*20 = 335
-  const SCREEN_W = 375; // approximation; will stretch fine
+  const { width: SCREEN_W } = useWindowDimensions();
   const swatchSize = (SCREEN_W - H_PAD * 2 - SWATCH_GAP * 3) / 4;
 
   const pickPhoto = useCallback(async () => {

@@ -27,6 +27,7 @@ export interface Database {
           cover_image_url: string | null;
           is_private: boolean;
           created_at: string;
+          deleted_at: string | null;
         };
         Insert: {
           id?: string;
@@ -37,6 +38,7 @@ export interface Database {
           cover_image_url?: string | null;
           is_private?: boolean;
           created_at?: string;
+          deleted_at?: string | null;
         };
         Update: {
           id?: string;
@@ -47,6 +49,7 @@ export interface Database {
           cover_image_url?: string | null;
           is_private?: boolean;
           created_at?: string;
+          deleted_at?: string | null;
         };
         Relationships: [];
       };
@@ -339,6 +342,20 @@ export interface Database {
           snippet: string;
         }>;
       };
+      get_deleted_journals: {
+        Args: Record<never, never>;
+        Returns: Array<{
+          id: string;
+          title: string;
+          cover_style: string;
+          cover_color: string | null;
+          cover_image_url: string | null;
+          is_private: boolean;
+          created_at: string;
+          deleted_at: string;
+          page_count: number;
+        }>;
+      };
       get_resurface_page: {
         Args: Record<string, never>;
         Returns: Array<{
@@ -349,6 +366,10 @@ export interface Database {
           transcription_text: string;
           created_at: string;
         }>;
+      };
+      get_storage_info: {
+        Args: Record<never, never>;
+        Returns: { used_bytes: number; limit_bytes: number };
       };
       get_user_storage_bytes: {
         Args: Record<string, never>;

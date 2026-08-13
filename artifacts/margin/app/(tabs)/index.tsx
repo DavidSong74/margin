@@ -1,11 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect, router } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
+  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -254,11 +256,13 @@ const LibraryGridItem = React.memo(function LibraryGridItem({
   cardW,
   cardH,
   colors,
+  onMenuPress,
 }: {
   item: GridItem;
   cardW: number;
   cardH: number;
   colors: ReturnType<typeof useColors>;
+  onMenuPress: (journal: JournalItem) => void;
 }) {
   return (
     <View style={{ marginBottom: COL_GAP }}>
@@ -285,13 +289,32 @@ const LibraryGridItem = React.memo(function LibraryGridItem({
               },
             });
           }}
+          onLongPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onMenuPress(item.journal);
+          }}
+          delayLongPress={400}
           activeOpacity={0.82}
         >
-          <JournalCover
-            journal={item.journal}
-            cardW={cardW}
-            cardH={cardH}
-          />
+          <View style={{ position: "relative" }}>
+            <JournalCover
+              journal={item.journal}
+              cardW={cardW}
+              cardH={cardH}
+            />
+            {/* 3-dot menu button — bottom-right of cover */}
+            <TouchableOpacity
+              style={styles.menuDotBtn}
+              onPress={(e) => {
+                e.stopPropagation();
+                Haptics.selectionAsync();
+                onMenuPress(item.journal);
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Feather name="more-vertical" size={14} color="#fff" />
+            </TouchableOpacity>
+          </View>
           <Text
             style={[
               styles.journalName,
@@ -339,6 +362,12 @@ export default function LibraryScreen() {
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+
+  // Context menu bottom sheet
+  const [menuJournal, setMenuJournal] = useState<JournalItem | null>(null);
+  const [editTitleText, setEditTitleText] = useState("");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [savingAction, setSavingAction] = useState(false);
 
   // S2: Inbox overlay
   const [inboxVisible, setInboxVisible] = useState(false);
@@ -474,20 +503,33 @@ export default function LibraryScreen() {
 
   // ── Filtering ──────────────────────────────────────────────
 
-  const filtered = searchText.trim()
-    ? journals.filter((j) =>
-        j.title.toLowerCase().includes(searchText.toLowerCase())
-      )
-    : journals;
+  const filtered = useMemo(
+    () =>
+      searchText.trim()
+        ? journals.filter((j) =>
+            j.title.toLowerCase().includes(searchText.toLowerCase())
+          )
+        : journals,
+    [journals, searchText]
+  );
 
   const isEmpty = !loading && filtered.length === 0;
 
-  const gridData: GridItem[] = [
-    { type: "new" },
-    ...filtered.map((j) => ({ type: "journal" as const, journal: j })),
-  ];
+  const gridData: GridItem[] = useMemo(
+    () => [
+      { type: "new" },
+      ...filtered.map((j) => ({ type: "journal" as const, journal: j })),
+    ],
+    [filtered]
+  );
 
   // ── Render helpers ─────────────────────────────────────────
+
+  const handleMenuPress = useCallback((journal: JournalItem) => {
+    setMenuJournal(journal);
+    setEditTitleText(journal.title);
+    setEditingTitle(false);
+  }, []);
 
   const renderItem = useCallback(
     ({ item }: { item: GridItem }) => (
@@ -496,10 +538,117 @@ export default function LibraryScreen() {
         cardW={cardW}
         cardH={cardH}
         colors={colors}
+        onMenuPress={handleMenuPress}
       />
     ),
-    [cardW, cardH, colors]
+    [cardW, cardH, colors, handleMenuPress]
   );
+
+  // ── Context menu actions ──────────────────────────────────────
+
+  const closeMenu = useCallback(() => setMenuJournal(null), []);
+
+  // Save a new title
+  const handleSaveTitle = useCallback(async () => {
+    if (!menuJournal) return;
+    const trimmed = editTitleText.trim();
+    if (!trimmed || trimmed === menuJournal.title) { closeMenu(); return; }
+    setSavingAction(true);
+    await supabase.from("journals").update({ title: trimmed }).eq("id", menuJournal.id);
+    setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { ...j, title: trimmed } : j));
+    setSavingAction(false);
+    closeMenu();
+  }, [menuJournal, editTitleText, closeMenu]);
+
+  // Change cover color
+  const COVER_COLORS = ["#c8b89a", "#a8b8a0", "#b8b0c8", "#b8c4b0", "#c0a898", "#a8b0b8"];
+  const handleChangeCoverColor = useCallback(async (hex: string) => {
+    if (!menuJournal) return;
+    await supabase.from("journals").update({ cover_style: "solid", cover_color: hex }).eq("id", menuJournal.id);
+    setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { ...j, coverStyle: "solid", coverColor: hex } : j));
+    closeMenu();
+  }, [menuJournal, closeMenu]);
+
+  // Change date
+  const handleChangeDate = useCallback(() => {
+    if (!menuJournal) return;
+    const current = menuJournal.createdAt.slice(0, 10);
+    Alert.prompt(
+      "Change date",
+      "Enter the date in YYYY-MM-DD format (e.g. 2023-06-15).",
+      async (input) => {
+        if (!input) return;
+        const parsed = new Date(input);
+        if (isNaN(parsed.getTime())) {
+          Alert.alert("Invalid date", "Please use YYYY-MM-DD format.");
+          return;
+        }
+        const iso = parsed.toISOString();
+        await supabase.from("journals").update({ created_at: iso }).eq("id", menuJournal.id);
+        setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { ...j, createdAt: iso } : j));
+        closeMenu();
+      },
+      "plain-text",
+      current
+    );
+  }, [menuJournal, closeMenu]);
+
+  // Toggle lock
+  const handleToggleLock = useCallback(async () => {
+    if (!menuJournal) return;
+    const newValue = !menuJournal.isPrivate;
+    await supabase.from("journals").update({ is_private: newValue }).eq("id", menuJournal.id);
+    setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { ...j, isPrivate: newValue } : j));
+    closeMenu();
+  }, [menuJournal, closeMenu]);
+
+  // Soft delete
+  const handleDeleteJournal = useCallback(() => {
+    if (!menuJournal) return;
+    Alert.alert(
+      "Move to Recently Deleted?",
+      `"${menuJournal.title}" will be kept for 30 days, then permanently deleted. You can restore it from Profile → Deleted Journals.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            await supabase
+              .from("journals")
+              .update({ deleted_at: new Date().toISOString() })
+              .eq("id", menuJournal.id);
+            setJournals((prev) => prev.filter((j) => j.id !== menuJournal.id));
+            closeMenu();
+          },
+        },
+      ]
+    );
+  }, [menuJournal, closeMenu]);
+
+  // Export
+  const handleExportJournal = useCallback(async () => {
+    if (!menuJournal) return;
+    closeMenu();
+    const { data: pages } = await supabase
+      .from("pages")
+      .select("page_number, transcription_text")
+      .eq("journal_id", menuJournal.id)
+      .is("deleted_at", null)
+      .order("page_number");
+    if (!pages || pages.length === 0) {
+      Alert.alert("Nothing to export", "This journal has no transcribed pages.");
+      return;
+    }
+    const text = (pages as { page_number: number; transcription_text: string | null }[])
+      .map((p) => `--- Page ${p.page_number} ---\n${p.transcription_text ?? "(no transcription)"}`)
+      .join("\n\n");
+    const FileSystem = await import("expo-file-system/legacy");
+    const path = `${FileSystem.cacheDirectory}${menuJournal.title.replace(/[^a-z0-9]/gi, "_")}.txt`;
+    await FileSystem.writeAsStringAsync(path, text, { encoding: FileSystem.EncodingType.UTF8 });
+    const Sharing = await import("expo-sharing");
+    await Sharing.shareAsync(path, { mimeType: "text/plain", UTI: "public.plain-text" });
+  }, [menuJournal, closeMenu]);
 
   // ── Header ─────────────────────────────────────────────────
 
@@ -667,6 +816,139 @@ export default function LibraryScreen() {
         columnWrapperStyle={styles.columnWrapper}
         showsVerticalScrollIndicator={false}
       />
+      
+      {/* ── Journal context menu bottom sheet ── */}
+      <Modal
+        visible={menuJournal !== null}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeMenu}
+      >
+        {menuJournal && (
+          <View style={[styles.sheetRoot, { backgroundColor: colors.background }]}>
+            {/* Handle bar */}
+            <View style={styles.sheetHandle}>
+              <View style={[styles.sheetHandleBar, { backgroundColor: colors.border }]} />
+            </View>
+
+            {/* Header */}
+            <View style={styles.sheetHeader}>
+              <Text style={[styles.sheetTitle, { color: colors.foreground, fontFamily: "PlayfairDisplay_700Bold" }]}
+                numberOfLines={1}
+              >
+                {menuJournal.title}
+              </Text>
+              <TouchableOpacity onPress={closeMenu} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Feather name="x" size={22} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            </View>
+
+            {/* ── Edit title ── */}
+            {editingTitle ? (
+              <View style={styles.sheetTitleEdit}>
+                <TextInput
+                  value={editTitleText}
+                  onChangeText={setEditTitleText}
+                  autoFocus
+                  style={[
+                    styles.sheetTitleInput,
+                    { color: colors.foreground, borderColor: colors.primary, fontFamily: "Inter_400Regular" },
+                  ]}
+                  returnKeyType="done"
+                  onSubmitEditing={handleSaveTitle}
+                />
+                <TouchableOpacity
+                  onPress={handleSaveTitle}
+                  disabled={savingAction}
+                  style={[styles.sheetSaveBtn, { backgroundColor: colors.primary }]}
+                >
+                  <Text style={{ color: "#fff", fontFamily: "Inter_600SemiBold", fontSize: 14 }}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.sheetRow}
+                onPress={() => setEditingTitle(true)}
+              >
+                <Feather name="edit-2" size={18} color={colors.primary} />
+                <Text style={[styles.sheetRowLabel, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
+                  Edit title
+                </Text>
+                <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            )}
+
+            <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
+
+            {/* ── Change cover color ── */}
+            <View style={styles.sheetRow}>
+              <Feather name="droplet" size={18} color={colors.primary} />
+              <Text style={[styles.sheetRowLabel, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
+                Cover color
+              </Text>
+              <View style={styles.sheetSwatchRow}>
+                {COVER_COLORS.map((hex) => (
+                  <TouchableOpacity
+                    key={hex}
+                    style={[
+                      styles.sheetSwatch,
+                      { backgroundColor: hex },
+                      menuJournal.coverColor === hex && {
+                        borderWidth: 2.5,
+                        borderColor: colors.primary,
+                      },
+                    ]}
+                    onPress={() => handleChangeCoverColor(hex)}
+                  />
+                ))}
+              </View>
+            </View>
+
+            <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
+
+            {/* ── Change date ── */}
+            <TouchableOpacity style={styles.sheetRow} onPress={handleChangeDate}>
+              <Feather name="calendar" size={18} color={colors.primary} />
+              <Text style={[styles.sheetRowLabel, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
+                Change date
+              </Text>
+              <Text style={{ color: colors.mutedForeground, fontFamily: "Inter_400Regular", fontSize: 13 }}>
+                {formatDate(menuJournal.createdAt)}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
+
+            {/* ── Lock / Unlock ── */}
+            <TouchableOpacity style={styles.sheetRow} onPress={handleToggleLock}>
+              <Feather name={menuJournal.isPrivate ? "unlock" : "lock"} size={18} color={colors.primary} />
+              <Text style={[styles.sheetRowLabel, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
+                {menuJournal.isPrivate ? "Unlock journal" : "Lock journal"}
+              </Text>
+            </TouchableOpacity>
+
+            <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
+
+            {/* ── Export ── */}
+            <TouchableOpacity style={styles.sheetRow} onPress={handleExportJournal}>
+              <Feather name="share" size={18} color={colors.primary} />
+              <Text style={[styles.sheetRowLabel, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
+                Export journal
+              </Text>
+            </TouchableOpacity>
+
+            <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
+
+            {/* ── Delete (destructive) ── */}
+            <TouchableOpacity style={styles.sheetRow} onPress={handleDeleteJournal}>
+              <Feather name="trash-2" size={18} color={colors.destructive} />
+              <Text style={[styles.sheetRowLabel, { color: colors.destructive, fontFamily: "Inter_400Regular" }]}>
+                Delete journal
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </Modal>
     </View>
   );
 }
@@ -864,4 +1146,88 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   emptyBtnText: { color: "#fff", fontSize: 15 },
+  menuDotBtn: {
+    position: "absolute",
+    bottom: 8,
+    right: 8,
+    zIndex: 5,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "rgba(0,0,0,0.40)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetRoot: {
+    flex: 1,
+    paddingTop: 8,
+  },
+  sheetHandle: {
+    alignItems: "center",
+    paddingVertical: 10,
+  },
+  sheetHandleBar: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  sheetTitle: {
+    fontSize: 20,
+    letterSpacing: -0.3,
+    flex: 1,
+    marginRight: 12,
+  },
+  sheetRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    gap: 14,
+  },
+  sheetRowLabel: {
+    flex: 1,
+    fontSize: 16,
+  },
+  sheetDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 52,
+  },
+  sheetSwatchRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  sheetSwatch: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "transparent",
+  },
+  sheetTitleEdit: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 10,
+  },
+  sheetTitleInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  sheetSaveBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
 });

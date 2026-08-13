@@ -357,10 +357,11 @@ export default function CaptureScreen() {
     setBatchProgress({ current: 0, total: result.assets.length });
 
     try {
-      for (let i = 0; i < result.assets.length; i++) {
-        setBatchProgress({ current: i + 1, total: result.assets.length });
-        await uploadSinglePhoto(result.assets[i].uri, base + i, user);
-      }
+      await Promise.all(
+        result.assets.map((asset, i) =>
+          uploadSinglePhoto(asset.uri, base + i, user)
+        )
+      );
       router.replace({ pathname: "/journal/[id]", params: { id: journal_id } });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Upload failed";

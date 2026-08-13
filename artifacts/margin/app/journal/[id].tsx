@@ -378,6 +378,17 @@ export default function JournalReaderScreen() {
   const [corrSaving, setCorrSaving] = useState(false);
   const corrDecisions = useRef<CorrDecision[]>([]);
 
+  const getQuality = useCallback(async (): Promise<"balanced" | "best"> => {
+    try {
+      const raw = await AsyncStorage.getItem("margin:settings");
+      if (!raw) return "balanced";
+      const stored = JSON.parse(raw);
+      return stored.transcriptionQuality === "best" ? "best" : "balanced";
+    } catch {
+      return "balanced";
+    }
+  }, []);
+
   // ── Crop & Re-transcribe ─────────────────────────────────────
   const [cropState, setCropState] = useState<{
     pageId: string;
@@ -851,8 +862,9 @@ export default function JournalReaderScreen() {
       )
     );
 
+    const quality = await getQuality();
     const { error } = await supabase.functions.invoke("transcribe", {
-      body: { page_id: page.id },
+      body: { page_id: page.id, quality },
     });
 
     if (error) {
@@ -867,7 +879,7 @@ export default function JournalReaderScreen() {
       );
     }
     // On success, the Realtime subscription updates status to "done" automatically
-  }, [pages, currentPage]);
+  }, [pages, currentPage, getQuality]);
 
   // ── Crop & Re-transcribe ─────────────────────────────────────
 
@@ -949,7 +961,8 @@ export default function JournalReaderScreen() {
             .catch((e) => console.warn("[Reader] cleanup old crop:", e));
         }
 
-        await supabase.functions.invoke("transcribe", { body: { page_id: pageId } });
+        const quality = await getQuality();
+        await supabase.functions.invoke("transcribe", { body: { page_id: pageId, quality } });
       } catch (err) {
         console.error("[Reader] crop upload error:", err);
         setPages((prev) =>
@@ -958,7 +971,7 @@ export default function JournalReaderScreen() {
         Alert.alert("Error", "Could not upload cropped image. Please try again.");
       }
     },
-    [cropState]
+    [cropState, getQuality]
   );
 
   // ── Restore original image ───────────────────────────────────
@@ -988,7 +1001,7 @@ export default function JournalReaderScreen() {
             await supabase
               .from("pages")
               .update({
-                image_path: page.originalImagePath,
+                image_path: page.originalImagePath!,
                 original_image_path: null,
                 transcription_text: null,
                 transcription_status: "pending",
@@ -1014,12 +1027,13 @@ export default function JournalReaderScreen() {
               )
             );
 
-            await supabase.functions.invoke("transcribe", { body: { page_id: pageId } });
+            const quality = await getQuality();
+            await supabase.functions.invoke("transcribe", { body: { page_id: pageId, quality } });
           },
         },
       ]
     );
-  }, [pages]);
+  }, [pages, getQuality]);
 
   // ── Per-journal privacy toggle ───────────────────────────────
 
