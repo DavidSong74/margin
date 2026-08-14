@@ -126,80 +126,76 @@ Deno.serve(async (req: Request) => {
         ? `The user has previously corrected these handwriting misinterpretations (original → correct):\n${glossaryRows.map((g) => `  "${g.original_word}" → "${g.corrected_word}"`).join("\n")}\nApply these corrections when you see similar patterns.`
         : "";
 
-    // ── 7. First Gemini pass — full transcription ───────────
+    // ── 7. Single Gemini pass — transcription & uncertain words ───────────
     const qualityInstruction =
       quality === "best"
-        ? "Prioritize accuracy above all else. Re-read every word using surrounding context clues before committing. Do not skip uncertain words — make your best inference."
+        ? "Prioritize accuracy above all else. Re-read every word using surrounding context clues before committing."
         : "";
 
     const systemInstructions = [
       "You are an expert at transcribing handwritten text from journal pages.",
       "Transcribe all visible handwritten text exactly as written, preserving line breaks.",
-      "Return ONLY the transcribed text — no commentary, no formatting, no markdown.",
+      "Identify any individual words you were uncertain about and suggest your best guess for each.",
       qualityInstruction,
       glossaryHint,
+      "",
+      'You MUST return ONLY a valid JSON object matching this schema:',
+      '{ "transcription": "<full transcribed text>", "uncertain_words": [{"original": "<uncertain word>", "suggested": "<best guess>"}] }',
     ]
       .filter(Boolean)
       .join("\n\n");
 
     const geminiModel = quality === "best" ? GEMINI_MODEL_PRO : GEMINI_MODEL_FLASH;
 
-    const transcriptionText = await callGemini(geminiKey, {
-      systemInstruction: { parts: [{ text: systemInstructions }] },
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { inlineData: { mimeType: "image/jpeg", data: base64Image } },
-            { text: "Transcribe all handwritten text on this journal page." },
-          ],
+    const rawOutput = await callGemini(
+      geminiKey,
+      {
+        systemInstruction: { parts: [{ text: systemInstructions }] },
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inlineData: { mimeType: "image/jpeg", data: base64Image } },
+              { text: "Transcribe all handwritten text on this page and list any uncertain words as JSON." },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: "application/json",
         },
-      ],
-    }, geminiModel);
-
-    // ── 8. Second Gemini pass — uncertain words ─────────────
-    // Ask Gemini to identify words it was uncertain about.
-    // Returns a JSON array of { original, suggested } objects.
-    const uncertainJson = await callGemini(geminiKey, {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { inlineData: { mimeType: "image/jpeg", data: base64Image } },
-            {
-              text: [
-                "Given the following transcription of the handwritten text on this page, list any individual words you were uncertain about.",
-                "For each uncertain word, provide your best guess for the intended word.",
-                "",
-                `Transcription:\n${transcriptionText}`,
-                "",
-                'Return ONLY a valid JSON array. Each element must be {"original": "<uncertain word>", "suggested": "<best guess>"}.',
-                "If you were not uncertain about any words, return an empty array: []",
-              ].join("\n"),
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
       },
-    });
+      geminiModel
+    );
 
-    // Parse uncertain words — fail gracefully if Gemini returns malformed JSON
+    let transcriptionText = "";
     let pendingCorrections: Array<{ original: string; suggested: string }> = [];
+
     try {
-      const parsed = JSON.parse(uncertainJson);
-      if (Array.isArray(parsed)) {
-        pendingCorrections = parsed.filter(
-          (item) => typeof item?.original === "string" && typeof item?.suggested === "string",
+      const cleanJsonStr = rawOutput
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```$/, "")
+        .trim();
+
+      const parsed = JSON.parse(cleanJsonStr);
+
+      if (typeof parsed.transcription === "string") {
+        transcriptionText = parsed.transcription;
+      }
+      if (Array.isArray(parsed.uncertain_words)) {
+        pendingCorrections = parsed.uncertain_words.filter(
+          (item: any) =>
+            typeof item?.original === "string" &&
+            typeof item?.suggested === "string" &&
+            item.original.trim().length > 0
         );
       }
-    } catch {
-      // Malformed JSON from Gemini — continue with empty corrections
-      console.warn("[transcribe] Could not parse uncertain words JSON:", uncertainJson.slice(0, 200));
+    } catch (parseErr) {
+      console.warn("[transcribe] Failed to parse JSON response, falling back to raw output:", parseErr);
+      transcriptionText = rawOutput;
     }
 
-    // ── 9. Write results to database ────────────────────────
+    // ── 8. Write results to database in a single update ────────
     const { error: updateErr } = await adminClient
       .from("pages")
       .update({

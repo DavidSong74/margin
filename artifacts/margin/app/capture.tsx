@@ -356,13 +356,43 @@ export default function CaptureScreen() {
     setScreen("batch_uploading");
     setBatchProgress({ current: 0, total: result.assets.length });
 
+    let successCount = 0;
+    let failCount = 0;
+    const BATCH_SIZE = 2;
+
     try {
-      await Promise.all(
-        result.assets.map((asset, i) =>
-          uploadSinglePhoto(asset.uri, base + i, user)
-        )
-      );
-      router.replace({ pathname: "/journal/[id]", params: { id: journal_id } });
+      for (let i = 0; i < result.assets.length; i += BATCH_SIZE) {
+        const chunk = result.assets.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          chunk.map(async (asset, idx) => {
+            try {
+              await uploadSinglePhoto(asset.uri, base + i + idx, user);
+              successCount++;
+            } catch (err) {
+              console.error(`[capture] Failed to upload photo ${i + idx}:`, err);
+              failCount++;
+            }
+          })
+        );
+        setBatchProgress({
+          current: Math.min(i + BATCH_SIZE, result.assets.length),
+          total: result.assets.length,
+        });
+      }
+
+      if (failCount > 0) {
+        Alert.alert(
+          "Import Completed",
+          `Successfully uploaded ${successCount} page(s). ${failCount} page(s) failed.`
+        );
+      }
+
+      if (successCount > 0) {
+        router.replace({ pathname: "/journal/[id]", params: { id: journal_id } });
+      } else {
+        setUploadError("Failed to upload selected photos.");
+        setScreen("viewfinder");
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Upload failed";
       setUploadError(msg);
