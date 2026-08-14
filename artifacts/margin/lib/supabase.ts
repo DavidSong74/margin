@@ -5,15 +5,63 @@ import * as SecureStore from "expo-secure-store";
 
 import type { Database } from "./database.types";
 
-const ExpoSecureStoreAdapter = {
-  getItem: (key: string) => {
-    return SecureStore.getItemAsync(key);
+const CHUNK_SIZE = 2000;
+
+const ChunkedSecureStore = {
+  async getItem(key: string): Promise<string | null> {
+    if (Platform.OS === "web") return AsyncStorage.getItem(key);
+    try {
+      const countStr = await SecureStore.getItemAsync(`${key}_chunks`);
+      if (!countStr) return SecureStore.getItemAsync(key);
+
+      const count = parseInt(countStr, 10);
+      let result = "";
+      for (let i = 0; i < count; i++) {
+        const chunk = await SecureStore.getItemAsync(`${key}_chunk_${i}`);
+        if (!chunk) return null;
+        result += chunk;
+      }
+      return result;
+    } catch {
+      return null;
+    }
   },
-  setItem: (key: string, value: string) => {
-    return SecureStore.setItemAsync(key, value);
+
+  async setItem(key: string, value: string): Promise<void> {
+    if (Platform.OS === "web") return AsyncStorage.setItem(key, value);
+    try {
+      if (value.length <= CHUNK_SIZE) {
+        await ChunkedSecureStore.removeItem(key);
+        await SecureStore.setItemAsync(key, value);
+        return;
+      }
+      await SecureStore.deleteItemAsync(key);
+      const count = Math.ceil(value.length / CHUNK_SIZE);
+      await SecureStore.setItemAsync(`${key}_chunks`, String(count));
+      for (let i = 0; i < count; i++) {
+        const chunk = value.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        await SecureStore.setItemAsync(`${key}_chunk_${i}`, chunk);
+      }
+    } catch (err) {
+      console.error("[SecureStore] Chunked setItem error:", err);
+    }
   },
-  removeItem: (key: string) => {
-    return SecureStore.deleteItemAsync(key);
+
+  async removeItem(key: string): Promise<void> {
+    if (Platform.OS === "web") return AsyncStorage.removeItem(key);
+    try {
+      const countStr = await SecureStore.getItemAsync(`${key}_chunks`);
+      if (countStr) {
+        const count = parseInt(countStr, 10);
+        for (let i = 0; i < count; i++) {
+          await SecureStore.deleteItemAsync(`${key}_chunk_${i}`);
+        }
+        await SecureStore.deleteItemAsync(`${key}_chunks`);
+      }
+      await SecureStore.deleteItemAsync(key);
+    } catch (err) {
+      console.error("[SecureStore] Chunked removeItem error:", err);
+    }
   },
 };
 
@@ -28,7 +76,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: Platform.OS === "web" ? AsyncStorage : ExpoSecureStoreAdapter,
+    storage: ChunkedSecureStore,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
