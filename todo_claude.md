@@ -5,10 +5,10 @@
 | # | Item | File / Location | Priority | Status |
 |---|------|-----------------|----------|--------|
 | **D1** | Fix App Store URL placeholder | `artifacts/margin/app/(tabs)/profile.tsx` | Low | ⏸ Blocked — needs App Store Connect ID |
-| **SEC-01** | Fix `reorder_pages` SQL unique constraint crash | `supabase/migrations/` | 🔴 High | ⏳ Pending Implementation |
-| **SEC-02** | Fix Android Supabase token truncation in `SecureStore` | `artifacts/margin/lib/supabase.ts` | 🟡 Medium | ⏳ Pending Implementation |
-| **PERF-01** | Limit concurrency for multi-photo library import | `artifacts/margin/app/capture.tsx` | 🔴 High | ⏳ Pending Implementation |
-| **PERF-02** | Refactor `transcribe` Edge Function to single-pass Gemini call | `supabase/functions/transcribe/index.ts` | 🔴 High | ⏳ Pending Implementation |
+| **SEC-01** | Fix `reorder_pages` SQL unique constraint crash | `supabase/migrations/` | 🔴 High | ✅ Done |
+| **SEC-02** | Fix Android Supabase token truncation in `SecureStore` | `artifacts/margin/lib/supabase.ts` | 🟡 Medium | ✅ Done |
+| **PERF-01** | Limit concurrency for multi-photo library import | `artifacts/margin/app/capture.tsx` | 🔴 High | ✅ Done |
+| **PERF-02** | Refactor `transcribe` Edge Function to single-pass Gemini call | `supabase/functions/transcribe/index.ts` | 🔴 High | ✅ Done |
 | **E4** | Verify Gemini API key & secrets in Supabase Vault | Supabase Dashboard | 🟡 Important | ⏳ Pending Verification |
 | **D2** | iCloud Backup integration | `artifacts/margin/app/(tabs)/profile.tsx` | Low | ⏸ Deferred |
 | **D3** | Google Drive Backup integration | `artifacts/margin/app/(tabs)/profile.tsx` | Low | ⏸ Deferred |

@@ -123,7 +123,7 @@ Deno.serve(async (req: Request) => {
 
     const glossaryHint =
       glossaryRows && glossaryRows.length > 0
-        ? `The user has previously corrected these handwriting misinterpretations (original → correct):\n${glossaryRows.map((g) => `  "${g.original_word}" → "${g.corrected_word}"`).join("\n")}\nApply these corrections when you see similar patterns.`
+        ? `The user has previously corrected these handwriting misinterpretations (original → correct):\n${glossaryRows.map((g: { original_word: string; corrected_word: string }) => `  "${g.original_word}" → "${g.corrected_word}"`).join("\n")}\nApply these corrections when you see similar patterns.`
         : "";
 
     // ── 7. Single Gemini pass — transcription & uncertain words ───────────
