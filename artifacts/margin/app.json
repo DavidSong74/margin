@@ -27,7 +27,8 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -37,7 +38,7 @@
       [
         "expo-router",
         {
-          "origin": "https://replit.com/"
+          "origin": "https://margin.app/"
         }
       ],
       "expo-font",
@@ -49,12 +50,17 @@
           "icon": "./assets/images/notification-icon.png",
           "color": "#7d9b76"
         }
-      ],
-      "@react-native-community/datetimepicker"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "502baed6-cc42-4602-8e21-c66f93931d62"
+      }
+    },
+    "owner": "davidsong74"
   }
 }
