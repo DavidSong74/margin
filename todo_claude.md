@@ -8,9 +8,9 @@
 | D2 | iCloud backup | — | ⏸ Defer |
 | D3 | Google Drive backup | — | ⏸ Defer |
 | D4 | Home screen widget | — | ⏸ Defer |
-| E1 | Add Supabase env vars to `eas.json` preview profile | `eas.json` | 🔴 Critical — build won't work without this |
-| E2 | Design a proper splash screen | `assets/images/` | 🟡 Polish — currently reuses icon.png |
-| E3 | Add Android adaptive icon | `assets/images/` | 🟡 Polish — avoids awkward icon cropping on Android |
+| E1 | Add Supabase env vars to `eas.json` preview profile | `eas.json` | ✅ Done |
+| E2 | Design a proper splash screen | `assets/images/` | ✅ Done |
+| E3 | Add Android adaptive icon | `assets/images/` | ✅ Done |
 | E4 | Verify Gemini API key in Supabase Vault | Supabase dashboard | 🟡 Important — transcription fails without it |
 
 ---
