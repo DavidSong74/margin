@@ -199,7 +199,7 @@ CREATE OR REPLACE FUNCTION public.find_user_by_email(p_email text)
 RETURNS TABLE (user_id uuid, user_email text)
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 AS $$
   SELECT id AS user_id, email::text AS user_email
   FROM auth.users
@@ -220,14 +220,14 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = ''
 AS $$
   SELECT
     CASE WHEN f.requester_id = auth.uid() THEN f.addressee_id ELSE f.requester_id END AS friend_id,
     f.id   AS friendship_id,
     u.email::text AS friend_email,
     f.updated_at AS since
-  FROM friendships f
+  FROM public.friendships f
   JOIN auth.users u ON u.id = CASE WHEN f.requester_id = auth.uid() THEN f.addressee_id ELSE f.requester_id END
   WHERE f.status = 'accepted'
     AND (f.requester_id = auth.uid() OR f.addressee_id = auth.uid())
@@ -246,12 +246,12 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = ''
 AS $$
   SELECT f.id AS friendship_id, f.requester_id AS from_user_id,
     u.email::text AS from_user_email,
     f.created_at
-  FROM friendships f
+  FROM public.friendships f
   JOIN auth.users u ON u.id = f.requester_id
   WHERE f.addressee_id = auth.uid()
     AND f.status = 'pending'
@@ -276,7 +276,7 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = ''
 AS $$
   SELECT
     se.id            AS entry_id,
@@ -289,14 +289,14 @@ AS $$
     COUNT(DISTINCT fl.id)              AS like_count,
     COUNT(DISTINCT fc.id)              AS comment_count,
     BOOL_OR(fl.user_id = auth.uid())   AS viewer_liked
-  FROM shared_entries se
+  FROM public.shared_entries se
   JOIN auth.users u ON u.id = se.user_id
-  LEFT JOIN feed_likes    fl ON fl.entry_id = se.id
-  LEFT JOIN feed_comments fc ON fc.entry_id = se.id
+  LEFT JOIN public.feed_likes    fl ON fl.entry_id = se.id
+  LEFT JOIN public.feed_comments fc ON fc.entry_id = se.id
   WHERE (
     se.user_id = auth.uid()
     OR EXISTS (
-      SELECT 1 FROM friendships f
+      SELECT 1 FROM public.friendships f
       WHERE f.status = 'accepted'
         AND (
           (f.requester_id = se.user_id AND f.addressee_id = auth.uid())
@@ -323,12 +323,12 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = ''
 AS $$
   SELECT fc.id AS comment_id, fc.user_id,
     u.email::text AS author_email,
     fc.comment_text, fc.created_at
-  FROM feed_comments fc
+  FROM public.feed_comments fc
   JOIN auth.users u ON u.id = fc.user_id
   WHERE fc.entry_id = p_entry_id
   ORDER BY fc.created_at;

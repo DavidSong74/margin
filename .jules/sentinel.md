@@ -1,0 +1,4 @@
+## 2025-02-27 - [Supabase RPC Security]
+**Vulnerability:** Supabase Postgres RPC functions were created using `SECURITY DEFINER` when they only required `SECURITY INVOKER` (bypassing RLS unnecessarily). For those that strictly required `SECURITY DEFINER` to access `auth.users`, the `search_path` was set to `public`, opening up potential search path hijacking and privilege escalation vulnerabilities.
+**Learning:** In this project, `SECURITY DEFINER` should only be used when strictly necessary (e.g. for `auth.users` access) and must have a properly bounded execution context.
+**Prevention:** Always default RPCs to `SECURITY INVOKER`. If `SECURITY DEFINER` is required, secure its execution context by setting `search_path = ''` and fully qualifying schema references (`public.tablename`, `auth.users`).
