@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -26,6 +26,36 @@ interface Comment {
   created_at: string;
 }
 
+// ⚡ Bolt: Extract and memoize FlatList item to prevent unnecessary re-renders
+const CommentItem = React.memo(function CommentItem({
+  item,
+  colors,
+}: {
+  item: Comment;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={styles.commentRow}>
+      <Text
+        style={[
+          styles.commentAuthor,
+          { color: colors.primary, fontFamily: "Inter_600SemiBold" },
+        ]}
+      >
+        {item.author_email}
+      </Text>
+      <Text
+        style={[
+          styles.commentText,
+          { color: colors.foreground, fontFamily: "Inter_400Regular" },
+        ]}
+      >
+        {item.comment_text}
+      </Text>
+    </View>
+  );
+});
+
 interface Props {
   entryId: string | null;
   onClose: () => void;
@@ -39,6 +69,12 @@ export function CommentsSheet({ entryId, onClose }: Props) {
   const [newText, setNewText] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // ⚡ Bolt: Memoize the renderItem function to maintain stable object reference
+  const renderComment = useCallback(
+    ({ item }: { item: Comment }) => <CommentItem item={item} colors={colors} />,
+    [colors]
+  );
 
   useEffect(() => {
     if (!entryId) {
@@ -147,26 +183,7 @@ export function CommentsSheet({ entryId, onClose }: Props) {
                   No comments yet. Be the first!
                 </Text>
               }
-              renderItem={({ item }) => (
-                <View style={styles.commentRow}>
-                  <Text
-                    style={[
-                      styles.commentAuthor,
-                      { color: colors.primary, fontFamily: "Inter_600SemiBold" },
-                    ]}
-                  >
-                    {item.author_email}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.commentText,
-                      { color: colors.foreground, fontFamily: "Inter_400Regular" },
-                    ]}
-                  >
-                    {item.comment_text}
-                  </Text>
-                </View>
-              )}
+              renderItem={renderComment}
             />
           )}
 
