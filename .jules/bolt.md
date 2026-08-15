@@ -1,0 +1,3 @@
+## 2024-03-21 - [Extract and memoize inline FlatList renderItem functions]
+**Learning:** Using inline arrow functions directly in the `renderItem` prop of a React Native `FlatList` causes the list to completely re-render every time the parent component's state changes (for example, when a user is typing a new comment or search string). This leads to noticeable performance jank.
+**Action:** When working with React Native `FlatList`, always extract list items into separate components wrapped in `React.memo()`. Then, pass a stable function to `renderItem` by wrapping it in `useCallback`. This conforms to Bolt's frontend performance optimization principles.

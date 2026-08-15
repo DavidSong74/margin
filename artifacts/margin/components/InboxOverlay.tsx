@@ -43,6 +43,44 @@ interface SearchResult {
   user_email: string;
 }
 
+// ⚡ Bolt: Extract and memoize FlatList item to prevent unnecessary re-renders
+const FriendItem = React.memo(function FriendItem({
+  item,
+  colors,
+}: {
+  item: Friend;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={[styles.friendRow, { borderColor: colors.border }]}>
+      <View
+        style={[
+          styles.friendAvatar,
+          { backgroundColor: colors.primary + "22" },
+        ]}
+      >
+        <Text
+          style={[
+            styles.friendInitial,
+            { color: colors.primary, fontFamily: "Inter_700Bold" },
+          ]}
+        >
+          {item.friend_email[0].toUpperCase()}
+        </Text>
+      </View>
+      <Text
+        style={[
+          styles.friendEmail,
+          { color: colors.foreground, fontFamily: "Inter_400Regular" },
+        ]}
+        numberOfLines={1}
+      >
+        {item.friend_email}
+      </Text>
+    </View>
+  );
+});
+
 interface Props {
   visible: boolean;
   onClose: () => void;
@@ -60,6 +98,12 @@ export function InboxOverlay({ visible, onClose, onNotificationsRead }: Props) {
   const [friends, setFriends] = useState<Friend[]>([]);
   const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  // ⚡ Bolt: Memoize the renderItem function to maintain stable object reference
+  const renderFriend = useCallback(
+    ({ item }: { item: Friend }) => <FriendItem item={item} colors={colors} />,
+    [colors]
+  );
 
   const fetchAll = useCallback(async () => {
     const [{ data: friendsData }, { data: pendingData }, { data: notifData }] =
@@ -400,34 +444,7 @@ export function InboxOverlay({ visible, onClose, onNotificationsRead }: Props) {
               data={friends}
               keyExtractor={(f) => f.friend_id}
               showsVerticalScrollIndicator={false}
-              renderItem={({ item }) => (
-                <View style={[styles.friendRow, { borderColor: colors.border }]}>
-                  <View
-                    style={[
-                      styles.friendAvatar,
-                      { backgroundColor: colors.primary + "22" },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.friendInitial,
-                        { color: colors.primary, fontFamily: "Inter_700Bold" },
-                      ]}
-                    >
-                      {item.friend_email[0].toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text
-                    style={[
-                      styles.friendEmail,
-                      { color: colors.foreground, fontFamily: "Inter_400Regular" },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {item.friend_email}
-                  </Text>
-                </View>
-              )}
+              renderItem={renderFriend}
             />
           )}
         </View>
