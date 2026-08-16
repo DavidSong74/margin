@@ -1,0 +1,3 @@
+## 2024-05-18 - [Memoizing FlatList renderItem]
+**Learning:** In React Native / Expo apps (specifically seen in `CommentsSheet.tsx`), inline `renderItem` functions inside `FlatList` components cause severe input lag if a text input controls parent state. When `newText` updates on every keystroke, the parent re-renders, creating a new `renderItem` reference, causing the entire list to unnecessarily re-render.
+**Action:** Always extract list items into separate components wrapped in `React.memo()` and use `useCallback` for `renderItem` when working with `FlatList` that shares state with rapid-fire inputs (like `TextInput`).
