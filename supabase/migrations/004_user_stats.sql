@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION public.get_user_storage_bytes()
 RETURNS bigint
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public, storage
+SET search_path = ''
 AS $$
   SELECT COALESCE(
     SUM((o.metadata->>'size')::bigint),
