@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION public.get_user_stats()
 RETURNS json
 LANGUAGE sql
-SECURITY DEFINER
+SECURITY INVOKER
 SET search_path = public
 AS $$
   SELECT json_build_object(
