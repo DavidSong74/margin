@@ -31,6 +31,36 @@ interface Props {
   onClose: () => void;
 }
 
+// ⚡ Bolt: Memoized CommentRow to prevent re-renders when typing in the new comment input
+const CommentRow = React.memo(function CommentRow({
+  item,
+  colors,
+}: {
+  item: Comment;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={styles.commentRow}>
+      <Text
+        style={[
+          styles.commentAuthor,
+          { color: colors.primary, fontFamily: "Inter_600SemiBold" },
+        ]}
+      >
+        {item.author_email}
+      </Text>
+      <Text
+        style={[
+          styles.commentText,
+          { color: colors.foreground, fontFamily: "Inter_400Regular" },
+        ]}
+      >
+        {item.comment_text}
+      </Text>
+    </View>
+  );
+});
+
 export function CommentsSheet({ entryId, onClose }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -54,6 +84,12 @@ export function CommentsSheet({ entryId, onClose }: Props) {
         setLoading(false);
       });
   }, [entryId]);
+
+  // ⚡ Bolt: Stable reference for renderItem prevents FlatList from invalidating items on keystrokes
+  const renderItem = React.useCallback(
+    ({ item }: { item: Comment }) => <CommentRow item={item} colors={colors} />,
+    [colors]
+  );
 
   async function handleSend() {
     const text = newText.trim();
@@ -147,26 +183,7 @@ export function CommentsSheet({ entryId, onClose }: Props) {
                   No comments yet. Be the first!
                 </Text>
               }
-              renderItem={({ item }) => (
-                <View style={styles.commentRow}>
-                  <Text
-                    style={[
-                      styles.commentAuthor,
-                      { color: colors.primary, fontFamily: "Inter_600SemiBold" },
-                    ]}
-                  >
-                    {item.author_email}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.commentText,
-                      { color: colors.foreground, fontFamily: "Inter_400Regular" },
-                    ]}
-                  >
-                    {item.comment_text}
-                  </Text>
-                </View>
-              )}
+              renderItem={renderItem}
             />
           )}
 
