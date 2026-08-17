@@ -1,0 +1,3 @@
+## 2025-02-14 - [React Native FlatList Re-render Optimization]
+**Learning:** In React Native, placing an inline anonymous function as the `renderItem` for a `FlatList` combined with rapid local state updates (like a `TextInput` in a chat or comment UI) causes a massive performance degradation due to React re-rendering every list item on every keystroke. This is especially impactful in Expo mobile apps because of Hermes' garbage collection on rapid function recreation.
+**Action:** Always extract `FlatList` items into separate components wrapped in `React.memo()` and use `React.useCallback` for the `renderItem` prop to maintain referential equality across state updates from text inputs.
