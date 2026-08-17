@@ -31,6 +31,38 @@ interface Props {
   onClose: () => void;
 }
 
+// ── Memoized Comment Item ──────────────────────────────────────────
+// Extracted and memoized to prevent re-rendering the entire list of
+// comments on every keystroke when typing a new comment in the TextInput.
+const CommentItem = React.memo(function CommentItem({
+  item,
+  colors,
+}: {
+  item: Comment;
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={styles.commentRow}>
+      <Text
+        style={[
+          styles.commentAuthor,
+          { color: colors.primary, fontFamily: "Inter_600SemiBold" },
+        ]}
+      >
+        {item.author_email}
+      </Text>
+      <Text
+        style={[
+          styles.commentText,
+          { color: colors.foreground, fontFamily: "Inter_400Regular" },
+        ]}
+      >
+        {item.comment_text}
+      </Text>
+    </View>
+  );
+});
+
 export function CommentsSheet({ entryId, onClose }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -83,6 +115,15 @@ export function CommentsSheet({ entryId, onClose }: Props) {
       setNewText("");
     }
   }
+
+  // Memoize the renderItem callback so it has stable reference equality across renders,
+  // preventing FlatList from re-rendering the item components on keystroke state changes.
+  const renderItem = React.useCallback(
+    ({ item }: { item: Comment }) => (
+      <CommentItem item={item} colors={colors} />
+    ),
+    [colors]
+  );
 
   return (
     <Modal
@@ -147,26 +188,7 @@ export function CommentsSheet({ entryId, onClose }: Props) {
                   No comments yet. Be the first!
                 </Text>
               }
-              renderItem={({ item }) => (
-                <View style={styles.commentRow}>
-                  <Text
-                    style={[
-                      styles.commentAuthor,
-                      { color: colors.primary, fontFamily: "Inter_600SemiBold" },
-                    ]}
-                  >
-                    {item.author_email}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.commentText,
-                      { color: colors.foreground, fontFamily: "Inter_400Regular" },
-                    ]}
-                  >
-                    {item.comment_text}
-                  </Text>
-                </View>
-              )}
+              renderItem={renderItem}
             />
           )}
 
