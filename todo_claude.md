@@ -1,8 +1,8 @@
 # Margin — Pending Engineering Tasks & Detailed Technical Specifications
 
 > **File Location:** `todo_claude.md`  
-> **Last Updated:** August 14, 2026  
-> **Status:** All completed tasks (`SEC-01`, `SEC-02`, `PERF-01`, `PERF-02`, Adaptive Icon) have been removed. The remaining pending tasks below contain hyper-specific implementation details so nothing is left to guess.
+> **Last Updated:** August 19, 2026  
+> **Status:** All completed tasks (`SEC-01` through `07`, `PERF-01` through `04`, `FEAT-01`, `FEAT-03`, `BUG-01`, Adaptive Icon) have been removed. The remaining pending tasks below contain hyper-specific implementation details so nothing is left to guess.
 
 ---
 
@@ -10,20 +10,14 @@
 
 | # | Item | Target File(s) | Category | Status / Priority |
 |---|------|----------------|----------|-------------------|
-| **SEC-03** | Prevent user email enumeration in friend lookup RPC | `supabase/migrations/015_fix_email_search.sql` | Security | ✅ Completed |
-| **SEC-04** | Fix path traversal check in production web server | `artifacts/margin/server/serve.js` | Security | ✅ Completed |
-| **SEC-05** | Sanitize dev login credentials in client bundle | `artifacts/margin/app/index.tsx` | Security | ✅ Verified / Completed |
-| **PERF-03** | Add partial composite DB indexes for active pages & likes | `supabase/migrations/016_performance_indexes.sql` | Performance | ✅ Completed |
-| **PERF-04** | Store pre-computed `word_count` column on `pages` table | `supabase/migrations/017_word_count.sql`, `transcribe/index.ts` | Performance | ✅ Completed |
-| **BUG-01** | Fix page number collision on capture after deletion | `artifacts/margin/app/capture.tsx` | Bug Fix | ✅ Completed |
-| **SEC-07** | Fix biometric auth race condition in journal reader | `artifacts/margin/app/journal/[id].tsx` | Security | ✅ Completed |
-| **FEAT-01** | Searchable PDF Journal Export Engine | `artifacts/margin/lib/pdfExport.ts`, `profile.tsx` | Feature | ✅ Completed |
 | **E4** | Verify Gemini API key & secrets in Supabase Vault | Supabase Dashboard / CLI | Operations | 🟡 Important |
 | **D1** | Replace App Store review URL placeholder | `artifacts/margin/app/(tabs)/profile.tsx` | Release | ⏸ Blocked — needs Apple App ID |
 | **FEAT-02** | Semantic Vector Search via `pgvector` | `supabase/migrations/018_pgvector_search.sql` | Feature | 💡 Roadmap |
 | **D2** | iCloud Backup Integration | `artifacts/margin/app/(tabs)/profile.tsx` | Feature | ⏸ Deferred |
 | **D3** | Google Drive Backup Integration | `artifacts/margin/lib/googleDrive.ts`, `profile.tsx` | Feature | ⏸ Deferred |
 | **D4** | Home Screen Widget ("On This Day" / Streak) | `targets/widget` | Feature | ⏸ Deferred |
+| **FEAT-04** | Trial Limits & Transcription Paywall ($1/100 pages) | `supabase/migrations/018_paywall.sql`, `transcribe/index.ts` | Monetization | 💡 Roadmap |
+| **FEAT-05** | "Buy Me a Coffee" / Tip Jar (IAP & Supporter Perks) | `artifacts/margin/components/TipJarModal.tsx`, `profile.tsx`, `019_tipjar.sql` | Monetization | 💡 Roadmap |
 
 ---
 
@@ -38,229 +32,6 @@
 ---
 
 ## Technical Specifications for Pending Tasks
-
-### SEC-03. Prevent User Email Enumeration in Friend Lookup RPC
-
-* **Target File:** `supabase/migrations/014_fix_email_search.sql`
-* **Priority:** 🟡 Medium Priority (Security)
-
-#### Problem
-In `011_social.sql`, `find_user_by_email` runs as `SECURITY DEFINER` and returns user IDs and raw emails matching `lower(email) = lower(p_email)` without rate limiting or exact matching constraints.
-
-#### Exact Implementation Specification
-1. Create a migration file `supabase/migrations/014_fix_email_search.sql`.
-2. Update `find_user_by_email` to require exact email string match and return only `user_id` and masked email (`u***@domain.com`):
-
-```sql
--- Migration: 014_fix_email_search.sql
-CREATE OR REPLACE FUNCTION public.find_user_by_email(p_email text)
-RETURNS TABLE (user_id uuid, display_label text)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, auth
-AS $$
-DECLARE
-  v_caller_id uuid := auth.uid();
-  v_target_email text := lower(trim(p_email));
-BEGIN
-  -- Require caller authentication
-  IF v_caller_id IS NULL THEN
-    RAISE EXCEPTION 'Not authenticated';
-  END IF;
-
-  -- Require non-empty email
-  IF v_target_email IS NULL OR length(v_target_email) < 3 THEN
-    RETURN;
-  END IF;
-
-  RETURN QUERY
-  SELECT 
-    u.id AS user_id,
-    (regexp_replace(u.email, '^(.)[^@]+', '\1***') || '@' || split_part(u.email, '@', 2)) AS display_label
-  FROM auth.users u
-  WHERE lower(u.email) = v_target_email
-    AND u.id <> v_caller_id
-  LIMIT 1;
-END;
-$$;
-```
-
----
-
-### SEC-04. Fix Path Traversal Prefix Matching in Production Static Web Server
-
-* **Target File:** [`artifacts/margin/server/serve.js`](file:///Users/songdavid93374/Projects/margin/artifacts/margin/server/serve.js#L96-L105)
-* **Priority:** 🟡 Medium Priority (Security)
-
-#### Problem
-In `serve.js`, line 100 checks `filePath.startsWith(STATIC_ROOT)`. If `STATIC_ROOT` is `/var/www/static-build` without a trailing path separator, `.startsWith()` evaluates `true` for `/var/www/static-build-secrets/config.json`.
-
-#### Exact Implementation Specification
-In `artifacts/margin/server/serve.js`, update `serveStaticFile`:
-
-```javascript
-function serveStaticFile(urlPath, res) {
-  const safePath = path.normalize(urlPath).replace(/^(\.\.(\/|\\|$))+/, "");
-  const filePath = path.join(STATIC_ROOT, safePath);
-
-  // Ensure trailing separator to avoid matching sibling directories starting with same prefix
-  const rootWithSep = STATIC_ROOT.endsWith(path.sep) ? STATIC_ROOT : STATIC_ROOT + path.sep;
-  if (!filePath.startsWith(rootWithSep) && filePath !== STATIC_ROOT) {
-    res.writeHead(403);
-    res.end("Forbidden");
-    return;
-  }
-
-  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    res.writeHead(404);
-    res.end("Not Found");
-    return;
-  }
-
-  const ext = path.extname(filePath).toLowerCase();
-  const contentType = MIME_TYPES[ext] || "application/octet-stream";
-  const content = fs.readFileSync(filePath);
-  res.writeHead(200, { "content-type": contentType });
-  res.end(content);
-}
-```
-
----
-
-### SEC-05. Sanitize Dev Login Credentials in Client Bundle
-
-* **Target File:** [`artifacts/margin/app/index.tsx`](file:///Users/songdavid93374/Projects/margin/artifacts/margin/app/index.tsx#L659-L684)
-* **Priority:** 🟢 Low Priority (Security Hygiene)
-
-#### Problem
-`EXPO_PUBLIC_DEV_EMAIL` and `EXPO_PUBLIC_DEV_PASSWORD` environment variables are compiled directly into the Expo JS bundle if present in `.env`.
-
-#### Exact Implementation Specification
-In `artifacts/margin/app/index.tsx`, update the quick-login section to check explicit `__DEV__` flag and require dev mode without embedding default strings in production builds:
-
-```tsx
-{__DEV__ && process.env.EXPO_PUBLIC_DEV_EMAIL && (
-  <TouchableOpacity
-    style={styles.devFillButton}
-    onPress={() => {
-      setEmail(process.env.EXPO_PUBLIC_DEV_EMAIL || "");
-      setPassword(process.env.EXPO_PUBLIC_DEV_PASSWORD || "");
-    }}
-  >
-    <Text style={styles.devFillText}>⚡ Dev Quick Fill</Text>
-  </TouchableOpacity>
-)}
-```
-
----
-
-### PERF-03. Add Partial Composite Database Indexes
-
-* **Target File:** `supabase/migrations/015_performance_indexes.sql`
-* **Priority:** 🟡 Medium Priority (Performance)
-
-#### Problem
-1. Queries fetching active journal pages filter by `journal_id` AND `deleted_at IS NULL` and sort by `page_number`. The table currently only has a single-column index on `pages(journal_id)`.
-2. Social feed engagement checks perform `COUNT(DISTINCT feed_likes.id)` across all friends on every feed refresh.
-
-#### Exact Implementation Specification
-Create `supabase/migrations/015_performance_indexes.sql`:
-
-```sql
--- Migration: 015_performance_indexes.sql
-
--- 1. Partial compound index for fast active page queries
-CREATE INDEX IF NOT EXISTS pages_journal_active_idx
-  ON public.pages (journal_id, page_number)
-  WHERE deleted_at IS NULL;
-
--- 2. Compound index for feed likes lookup
-CREATE INDEX IF NOT EXISTS feed_likes_entry_user_idx
-  ON public.feed_likes (entry_id, user_id);
-
--- 3. Compound index for feed comments lookup
-CREATE INDEX IF NOT EXISTS feed_comments_entry_created_idx
-  ON public.feed_comments (entry_id, created_at DESC);
-```
-
----
-
-### PERF-04. Store Pre-Computed `word_count` Column on `pages` Table
-
-* **Target Files:** 
-  - `supabase/migrations/016_word_count.sql`
-  - [`supabase/functions/transcribe/index.ts`](file:///Users/songdavid93374/Projects/margin/supabase/functions/transcribe/index.ts)
-* **Priority:** 🟡 Medium Priority (Performance)
-
-#### Problem
-`get_user_stats()` calculates total user words by converting `transcription_text` to an array (`string_to_array(trim(p.transcription_text), ' ')`) across every page on every profile load.
-
-#### Exact Implementation Specification
-
-1. Create migration `supabase/migrations/016_word_count.sql`:
-
-```sql
--- Migration: 016_word_count.sql
-ALTER TABLE public.pages
-  ADD COLUMN IF NOT EXISTS word_count integer DEFAULT 0 NOT NULL;
-
--- Backfill word_count for existing pages
-UPDATE public.pages
-SET word_count = CASE 
-  WHEN transcription_text IS NULL OR trim(transcription_text) = '' THEN 0
-  ELSE array_length(string_to_array(trim(transcription_text), ' '), 1)
-END;
-
--- Fast index for word count aggregation
-CREATE INDEX IF NOT EXISTS pages_user_word_count_idx
-  ON public.pages (user_id, word_count)
-  WHERE deleted_at IS NULL;
-
--- Update get_user_stats to use pre-computed word_count column directly
-CREATE OR REPLACE FUNCTION public.get_user_stats()
-RETURNS TABLE (
-  total_journals  bigint,
-  total_pages     bigint,
-  total_words     bigint,
-  streak_days     integer
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  v_user_id uuid := auth.uid();
-BEGIN
-  RETURN QUERY
-  SELECT
-    (SELECT COUNT(*) FROM journals WHERE user_id = v_user_id AND deleted_at IS NULL) AS total_journals,
-    (SELECT COUNT(*) FROM pages WHERE user_id = v_user_id AND deleted_at IS NULL) AS total_pages,
-    (SELECT COALESCE(SUM(word_count), 0)::bigint FROM pages WHERE user_id = v_user_id AND deleted_at IS NULL) AS total_words,
-    1 AS streak_days;
-END;
-$$;
-```
-
-2. In `supabase/functions/transcribe/index.ts`, compute `wordCount` during transcription save:
-
-```typescript
-const wordCount = transcriptionText.trim()
-  ? transcriptionText.trim().split(/\s+/).length
-  : 0;
-
-await adminClient
-  .from("pages")
-  .update({
-    transcription_text: transcriptionText,
-    transcription_status: "done",
-    pending_corrections: pendingCorrections,
-    correction_count: pendingCorrections.length,
-    word_count: wordCount,
-  })
-  .eq("id", page_id);
-```
-
----
 
 ### E4. Verify Gemini API Key & Supabase Vault Secrets
 
@@ -302,69 +73,6 @@ Replace lines 1196–1200 in `profile.tsx` once Apple App ID is assigned:
   }}
 />
 ```
-
----
-
-### FEAT-01. Searchable PDF Journal Export Engine
-
-* **Target Files:**
-  - `artifacts/margin/lib/pdfExport.ts` (NEW)
-  - [`artifacts/margin/app/(tabs)/profile.tsx`](file:///Users/songdavid93374/Projects/margin/artifacts/margin/app/(tabs)/profile.tsx)
-* **Priority:** 💡 Feature Roadmap
-
-#### Exact Implementation Specification
-
-1. Create `artifacts/margin/lib/pdfExport.ts`:
-
-```typescript
-import * as Print from "expo-print";
-import * as Sharing from "expo-sharing";
-import { supabase } from "./supabase";
-
-export async function exportJournalToPdf(journalId: string, journalTitle: string): Promise<void> {
-  const { data: pages, error } = await supabase
-    .from("pages")
-    .select("page_number, image_url, transcription_text")
-    .eq("journal_id", journalId)
-    .is("deleted_at", null)
-    .order("page_number", { ascending: true });
-
-  if (error || !pages || pages.length === 0) {
-    throw new Error("No pages found to export.");
-  }
-
-  const pagesHtml = pages.map((p) => `
-    <div style="page-break-after: always; padding: 20px; font-family: system-ui, sans-serif;">
-      <h3 style="color: #666;">Page ${p.page_number}</h3>
-      ${p.image_url ? `<img src="${p.image_url}" style="max-width: 100%; max-height: 400px; object-fit: contain; border-radius: 8px;" />` : ''}
-      <div style="margin-top: 16px; padding: 12px; background: #faf7f2; border-radius: 8px; font-size: 14px; line-height: 1.5; white-space: pre-wrap;">
-        ${p.transcription_text || '<em>No transcription available</em>'}
-      </div>
-    </div>
-  `).join("");
-
-  const html = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <title>${journalTitle}</title>
-      </head>
-      <body>
-        <h1 style="text-align: center; margin-top: 40px; font-family: system-ui;">${journalTitle}</h1>
-        <p style="text-align: center; color: #888;">Exported from Margin</p>
-        <hr style="margin: 20px 0;" />
-        ${pagesHtml}
-      </body>
-    </html>
-  `;
-
-  const { uri } = await Print.printToFileAsync({ html });
-  await Sharing.shareAsync(uri, { mimeType: "application/pdf", dialogTitle: `Export ${journalTitle}` });
-}
-```
-
-2. Add "Export PDF" row in `profile.tsx` or journal detail reader.
 
 ---
 
@@ -434,113 +142,103 @@ $$;
 * **D3 (Google Drive Backup):** Implement `lib/googleDrive.ts` uploading encrypted backup JSON to Google Drive `appDataFolder` via OAuth token.
 * **D4 (Home Screen Widget):** Expo Widget extension storing daily streak and "On This Day" entry memory in `AppGroup` shared container.
 
-### FEAT-03. Add Unread Indicator (Red Dot) to Review Tab
+---
+
+### FEAT-04. Trial Limits & Transcription Paywall
 
 * **Target Files:**
-  - `artifacts/margin/app/(tabs)/_layout.tsx`
-  - `artifacts/margin/app/(tabs)/review.tsx`
-* **Priority:** 🟢 Low Priority (UI/UX)
+  - `supabase/migrations/018_paywall.sql`
+  - `supabase/functions/transcribe/index.ts`
+  - `artifacts/margin/app/paywall.tsx`
+* **Priority:** 💡 Monetization Roadmap
 
 #### Problem
-Currently, users don't know if they have a page to review until they tap the "Review" tab. A subtle red dot should appear on the Review tab icon if `get_resurface_page` has a pending entry.
+Transcriptions cost API credits. Users should be given a generous free trial of 100 pages, after which they must purchase top-ups (e.g., $1 for an additional 100 transcriptions) via RevenueCat or Stripe.
 
-#### Exact Implementation Specification
-1. In `artifacts/margin/app/(tabs)/review.tsx`, import `DeviceEventEmitter` from `react-native` and modify `fetchPage` to broadcast its result globally:
-   ```tsx
-   import { DeviceEventEmitter } from "react-native";
+#### Technical Direction
+1. Add `transcriptions_remaining` (default 100) to a new `public.user_limits` table tied to `auth.users`.
+2. Update the `transcribe` Edge Function to check `transcriptions_remaining > 0` before calling Gemini. Deduct 1 from the limit upon a successful transcription.
+3. Build a React Native screen that integrates RevenueCat (`react-native-purchases`) to offer a consumable "$1 for 100 pages" IAP.
+4. Set up a webhook from RevenueCat to Supabase to increment `transcriptions_remaining` when a purchase is successful.
 
-   // Inside ReviewScreen's fetchPage:
-   const fetchPage = useCallback(async () => {
-     try {
-       const { data, error } = await supabase.rpc("get_resurface_page");
-       if (error) throw error;
-       const rows = data as ResurfacePage[] | null;
-       if (rows && rows.length > 0) {
-         setPage(rows[0]);
-         DeviceEventEmitter.emit("review_queue_updated", true);
-       } else {
-         setPage(null);
-         DeviceEventEmitter.emit("review_queue_updated", false);
-       }
-     } catch (err) {
-       console.error("[Review] get_resurface_page error:", err);
-       setPage(null);
-     }
-   }, []);
-   ```
+---
 
-2. In `artifacts/margin/app/(tabs)/_layout.tsx`, add state to track if a review is available. Use a `useEffect` to fetch this on mount and on AppState changes (returning to foreground). Additionally, clear the indicator immediately if the user navigates to the Review tab:
-   ```tsx
-   import { AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
-   import { usePathname } from "expo-router";
+### FEAT-05. "Buy Me a Coffee" / Tip Jar (Fleshed Out)
 
-   // ... inside TabLayout component:
-   const [hasReview, setHasReview] = useState(false);
-   const pathname = usePathname();
+* **Target Files:**
+  - `artifacts/margin/app/(tabs)/profile.tsx` (Profile screen entry row)
+  - `artifacts/margin/components/TipJarModal.tsx` (Editorial tipping bottom sheet / modal)
+  - `artifacts/margin/lib/purchases.ts` (RevenueCat wrapper)
+  - `supabase/migrations/019_tipjar.sql` (Supporter status & tips ledger)
+* **Priority:** 💡 Monetization Roadmap
 
-   const checkReview = useCallback(async () => {
-     try {
-       const { data } = await supabase.rpc("get_resurface_page");
-       setHasReview(Array.isArray(data) && data.length > 0);
-     } catch {
-       setHasReview(false);
-     }
-   }, []);
+#### 1. Problem & Product Intent
+Allow passionate users to voluntarily support Margin's development without gating core handwriting recognition or journal reader features behind mandatory fees. In exchange, supporters receive cosmetic badges, exclusive foil cover accents, and gratitude from the developer.
 
-   // Dismiss red dot if user focuses the Review tab
-   useEffect(() => {
-     if (pathname === "/review") {
-       setHasReview(false);
-     }
-   }, [pathname]);
+#### 2. App Store & Platform Compliance (CRITICAL)
+* **Apple Guideline 3.2.1(vii) / 3.1.1 (StoreKit Requirement):** Digital tips on iOS **must** be implemented via In-App Purchases (IAP). Linking directly to external payment processors (e.g. Ko-fi, BuyMeACoffee, Stripe, PayPal) from within the native iOS binary violates Apple guidelines and results in **immediate App Store rejection**.
+* **Platform Splitting:**
+  - **Native (iOS / Android):** Use RevenueCat (`react-native-purchases`) consumable IAPs.
+  - **Web (`Platform.OS === 'web'`):** Safely fallback to opening an external Ko-fi / BuyMeACoffee link via `Linking.openURL()`.
 
-   useEffect(() => {
-     // Don't show dot if they are already on the Review tab
-     if (pathname !== "/review") {
-       checkReview();
-     }
-     
-     const appStateSub = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
-       if (nextAppState === "active" && pathname !== "/review") checkReview();
-     });
-     
-     const eventSub = DeviceEventEmitter.addListener("review_queue_updated", (hasItems: boolean) => {
-       if (pathname !== "/review") setHasReview(hasItems);
-     });
+#### 3. RevenueCat Consumable Product Catalog
+Configure an Offering named `tip_jar` with three consumable tiers:
+1. **`margin_tip_small` ($0.99):** "Espresso Tip" ☕️
+2. **`margin_tip_medium` ($2.99):** "Cold Brew Tip" 🧋
+3. **`margin_tip_large` ($4.99):** "Artisan Roast Tip" 🫘
 
-     return () => {
-       appStateSub.remove();
-       eventSub.remove();
-     };
-   }, [checkReview, pathname]);
-   ```
+#### 4. Database Schema & State Persistence
+Tips are consumable transactions in StoreKit, but supporter perks must persist across devices.
+```sql
+-- supabase/migrations/019_tipjar.sql
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS is_supporter BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS total_tipped_cents INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS supporter_badge_style TEXT DEFAULT 'gold_quill';
 
-3. Update the `Tabs.Screen` for `review` in `_layout.tsx` to render the red dot badge directly inside `tabBarIcon` for precise placement:
-   ```tsx
-   <Tabs.Screen
-     name="review"
-     options={{
-       title: "Review",
-       tabBarIcon: ({ color }) => (
-         <View>
-           <Feather name="star" size={20} color={color} />
-           {hasReview && (
-             <View
-               style={{
-                 position: "absolute",
-                 top: -2,
-                 right: -4,
-                 width: 8,
-                 height: 8,
-                 borderRadius: 4,
-                 backgroundColor: colors.destructive || "#ef4444",
-                 borderWidth: 1.5,
-                 borderColor: isIOS ? "transparent" : colors.background,
-               }}
-             />
-           )}
-         </View>
-       ),
-     }}
-   />
-   ```
+CREATE TABLE IF NOT EXISTS public.tips_ledger (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  transaction_id TEXT NOT NULL UNIQUE,
+  amount_cents INTEGER NOT NULL,
+  platform TEXT NOT NULL CHECK (platform IN ('ios', 'android', 'web')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION public.record_tip(
+  p_transaction_id TEXT,
+  p_amount_cents INTEGER,
+  p_platform TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  INSERT INTO public.tips_ledger (user_id, transaction_id, amount_cents, platform)
+  VALUES (auth.uid(), p_transaction_id, p_amount_cents, p_platform)
+  ON CONFLICT (transaction_id) DO NOTHING;
+
+  UPDATE public.profiles
+  SET is_supporter = true,
+      total_tipped_cents = total_tipped_cents + p_amount_cents,
+      updated_at = now()
+  WHERE id = auth.uid();
+
+  RETURN jsonb_build_object('success', true);
+END;
+$$;
+```
+
+#### 5. UI/UX Workflow
+1. **Profile Entry Point:** Add a "Support Margin ☕️" row item in `profile.tsx` under a "Community & Support" section.
+2. **Tip Jar Modal (`components/TipJarModal.tsx`):**
+   - Matches Margin's paper-and-ink aesthetic (`#faf7f2` paper background, Playfair Display typography, warm sage accents).
+   - Shows a warm note explaining how user tips fund Gemini OCR server costs and continuous development.
+   - Three horizontal/grid tip cards displaying localized pricing fetched dynamically from RevenueCat.
+   - Custom haptic triggers upon selection (`Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)`).
+3. **Celebration & Perk Unlock:**
+   - On successful purchase, trigger `Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)`.
+   - Call `supabase.rpc('record_tip', ...)` to persist the user's supporter status.
+   - Show an animated wax seal / golden quill "Supporter" badge on their profile avatar and in shared feed entries.
+

@@ -221,10 +221,10 @@ export default function FeedScreen() {
       prev.map((e) =>
         e.entry_id === entryId
           ? {
-              ...e,
-              viewer_liked: !wasLiked,
-              like_count: wasLiked ? e.like_count - 1 : e.like_count + 1,
-            }
+            ...e,
+            viewer_liked: !wasLiked,
+            like_count: wasLiked ? e.like_count - 1 : e.like_count + 1,
+          }
           : e
       )
     );
@@ -286,7 +286,7 @@ export default function FeedScreen() {
               { color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
             ]}
           >
-            Add friends via the inbox (tap M in the Library) and ask them to
+            Add friends via the inbox (top right in the Library) and ask them to
             share a journal entry.
           </Text>
         </View>

@@ -1,7 +1,7 @@
 import { BlurView } from "expo-blur";
 import { Tabs, usePathname } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Platform, StyleSheet, View, useColorScheme, AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -20,11 +20,15 @@ export default function TabLayout() {
 
   const [hasReview, setHasReview] = useState(false);
   const pathname = usePathname();
+  const hasSeenReviewRef = useRef(false);
 
   const checkReview = useCallback(async () => {
+    if (hasSeenReviewRef.current) return;
     try {
       const { data } = await supabase.rpc("get_resurface_page");
-      setHasReview(Array.isArray(data) && data.length > 0);
+      if (!hasSeenReviewRef.current) {
+        setHasReview(Array.isArray(data) && data.length > 0);
+      }
     } catch {
       setHasReview(false);
     }
@@ -34,21 +38,28 @@ export default function TabLayout() {
   useEffect(() => {
     if (pathname === "/review") {
       setHasReview(false);
+      hasSeenReviewRef.current = true;
     }
   }, [pathname]);
 
+  // Initial check on mount
   useEffect(() => {
-    // Don't show dot if they are already on the Review tab
     if (pathname !== "/review") {
       checkReview();
     }
-    
+  }, [checkReview]);
+
+  // Listeners
+  useEffect(() => {
     const appStateSub = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
       if (nextAppState === "active" && pathname !== "/review") checkReview();
     });
-    
+
     const eventSub = DeviceEventEmitter.addListener("review_queue_updated", (hasItems: boolean) => {
-      if (pathname !== "/review") setHasReview(hasItems);
+      if (pathname !== "/review") {
+        if (hasItems) hasSeenReviewRef.current = false; // Reset if new items arrived
+        setHasReview(hasItems);
+      }
     });
 
     return () => {
@@ -69,8 +80,13 @@ export default function TabLayout() {
           borderTopWidth: isWeb ? 1 : 0,
           borderTopColor: colors.border,
           elevation: 0,
-          paddingBottom: insets.bottom,
-          ...(isWeb ? { height: 84 } : {}),
+          ...(isWeb
+            ? { height: 84, paddingBottom: insets.bottom }
+            : {
+              paddingTop: 8,
+              paddingBottom: Math.max(insets.bottom, 16),
+              height: 52 + Math.max(insets.bottom, 16),
+            }),
         },
         tabBarBackground: () =>
           isIOS ? (
