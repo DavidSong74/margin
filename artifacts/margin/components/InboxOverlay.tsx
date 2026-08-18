@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useState } from "react";
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from "react-native-reanimated";
 import {
   Alert,
   FlatList,
@@ -49,7 +50,25 @@ interface Props {
   onNotificationsRead: () => void;
 }
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 export function InboxOverlay({ visible, onClose, onNotificationsRead }: Props) {
+  const [renderModal, setRenderModal] = useState(visible);
+  const translateX = useSharedValue(400);
+  const backdropOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (visible) {
+      setRenderModal(true);
+      translateX.value = withSpring(0, { damping: 24, stiffness: 220, mass: 0.8 });
+      backdropOpacity.value = withTiming(1, { duration: 200 });
+    } else {
+      translateX.value = withSpring(400, { damping: 24, stiffness: 220, mass: 0.8 });
+      backdropOpacity.value = withTiming(0, { duration: 250 });
+      const t = setTimeout(() => setRenderModal(false), 300);
+      return () => clearTimeout(t);
+    }
+  }, [visible]);
   const colors = useColors();
   const insets = useSafeAreaInsets();
 
@@ -153,18 +172,19 @@ export function InboxOverlay({ visible, onClose, onNotificationsRead }: Props) {
 
   return (
     <Modal
-      visible={visible}
+      visible={renderModal}
       transparent
-      animationType="fade"
+      animationType="none"
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <Pressable style={styles.backdrop} onPress={onClose} />
+      <AnimatedPressable style={[styles.backdrop, { opacity: backdropOpacity }]} onPress={onClose} />
 
-      <View
+      <Animated.View
         style={[
           styles.panel,
           { backgroundColor: colors.card, paddingTop: insets.top + 16 },
+          { transform: [{ translateX }] }
         ]}
       >
         {/* Header */}
@@ -431,7 +451,7 @@ export function InboxOverlay({ visible, onClose, onNotificationsRead }: Props) {
             />
           )}
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
