@@ -29,9 +29,11 @@ import { DatePicker } from "@quidone/react-native-wheel-picker";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
+  useDerivedValue,
   withSpring,
   runOnJS,
   useAnimatedScrollHandler,
+  type SharedValue,
 } from "react-native-reanimated";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { ScrollView } from "react-native";
@@ -265,6 +267,194 @@ function EmptyState() {
 
 
 
+// ── DraggableItem ─────────────────────────────────────────────
+
+interface DraggableItemProps {
+  item: GridItem;
+  id: string;
+  positions: SharedValue<Record<string, number>>;
+  itemsLength: SharedValue<number>;
+  cardW: number;
+  cardH: number;
+  marginH: number;
+  colors: ReturnType<typeof useColors>;
+  onDragEnd: (newPositions: Record<string, number>) => void;
+  onMenuPress: (journal: JournalItem) => void;
+}
+
+const COL = 2;
+
+function DraggableItem({
+  item,
+  id,
+  positions,
+  itemsLength,
+  cardW,
+  cardH,
+  marginH,
+  colors,
+  onDragEnd,
+  onMenuPress,
+}: DraggableItemProps) {
+  const isDragging = useSharedValue(false);
+  const dragX = useSharedValue(0);
+  const dragY = useSharedValue(0);
+  const startPos = useSharedValue({ x: 0, y: 0 });
+  const scale = useSharedValue(1);
+  const zIndex = useSharedValue(1);
+
+  const getPosition = (idx: number) => {
+    "worklet";
+    const row = Math.floor(idx / COL);
+    const col = idx % COL;
+    return {
+      x: marginH + col * (cardW + marginH),
+      y: row * (cardH + COL_GAP),
+    };
+  };
+
+  const currentIndex = useDerivedValue(() => {
+    return positions.value[id] ?? 0;
+  });
+
+  const targetPosition = useDerivedValue(() => {
+    return getPosition(currentIndex.value);
+  });
+
+  // ── "New journal" tile ──
+  if (item.type === "new") {
+    const newTap = Gesture.Tap().onEnd(() => {
+      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
+      runOnJS(router.push)("/journal/new");
+    });
+    
+    const animStyle = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: withSpring(targetPosition.value.x) },
+        { translateY: withSpring(targetPosition.value.y) }
+      ],
+      zIndex: zIndex.value,
+    }));
+
+    return (
+      <GestureDetector gesture={newTap}>
+        <Animated.View style={[{ position: "absolute", left: 0, top: 0 }, animStyle]}>
+          <View style={{ marginBottom: COL_GAP }}>
+            <NewJournalTile cardW={cardW} cardH={cardH} />
+          </View>
+        </Animated.View>
+      </GestureDetector>
+    );
+  }
+
+  // ── Journal card ──
+  const journal = item.journal;
+
+  const navigate = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push({
+      pathname: "/journal/[id]",
+      params: { id: journal.id, title: journal.title, isPrivate: String(journal.isPrivate) },
+    });
+  };
+
+  const openMenu = () => {
+    Haptics.selectionAsync();
+    onMenuPress(journal);
+  };
+
+  const tap = Gesture.Tap().maxDuration(400).onEnd(() => { runOnJS(navigate)(); });
+  const pan = Gesture.Pan()
+    .activateAfterLongPress(400)
+    .onStart(() => {
+      "worklet";
+      isDragging.value = true;
+      startPos.value = getPosition(positions.value[id]);
+      dragX.value = startPos.value.x;
+      dragY.value = startPos.value.y;
+      scale.value = withSpring(1.08);
+      zIndex.value = 999;
+      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
+    })
+    .onUpdate((e) => {
+      "worklet";
+      const currentX = startPos.value.x + e.translationX;
+      const currentY = startPos.value.y + e.translationY;
+      dragX.value = currentX;
+      dragY.value = currentY;
+
+      const absX = currentX + (cardW / 2);
+      const absY = currentY + (cardH / 2);
+      const targetCol = Math.min(COL - 1, Math.max(0, Math.round((absX - marginH) / (cardW + marginH))));
+      const targetRow = Math.max(0, Math.round(absY / (cardH + COL_GAP)));
+      const targetIdx = Math.min(itemsLength.value - 1, targetRow * COL + targetCol);
+
+      const currentIdx = positions.value[id];
+      // Do not allow swapping with the "New journal" card (index 0)
+      if (targetIdx !== currentIdx && targetIdx !== 0) {
+        const newPositions = Object.assign({}, positions.value);
+        let swapId: string | null = null;
+        for (const key in newPositions) {
+          if (newPositions[key] === targetIdx) swapId = key;
+        }
+        if (swapId && swapId !== "new") {
+          newPositions[id] = targetIdx;
+          newPositions[swapId] = currentIdx;
+          positions.value = newPositions;
+          runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
+        }
+      }
+    })
+    .onEnd(() => {
+      "worklet";
+      isDragging.value = false;
+      scale.value = withSpring(1);
+      zIndex.value = 1;
+      runOnJS(onDragEnd)(positions.value);
+    });
+
+  const cardGesture = Gesture.Race(tap, pan);
+  const menuTap = Gesture.Tap().onEnd(() => { runOnJS(openMenu)(); });
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: isDragging.value ? dragX.value : withSpring(targetPosition.value.x) },
+      { translateY: isDragging.value ? dragY.value : withSpring(targetPosition.value.y) },
+      { scale: scale.value }
+    ],
+    zIndex: zIndex.value,
+  }));
+
+  return (
+    <GestureDetector gesture={cardGesture}>
+      <Animated.View style={[{ position: "absolute", left: 0, top: 0 }, animStyle]}>
+        <View style={{ marginBottom: COL_GAP }}>
+          <View style={{ position: "relative" }}>
+            <JournalCover journal={journal} cardW={cardW} cardH={cardH} />
+            <GestureDetector gesture={menuTap}>
+              <Animated.View
+                style={styles.menuDotBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Feather name="more-vertical" size={14} color="#fff" />
+              </Animated.View>
+            </GestureDetector>
+          </View>
+          <Text
+            style={[styles.journalName, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}
+            numberOfLines={1}
+          >
+            {journal.title}
+          </Text>
+          <Text style={[styles.journalMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+            {journal.pageCount} {journal.pageCount === 1 ? "page" : "pages"} · {formatDate(journal.createdAt)}
+          </Text>
+        </View>
+      </Animated.View>
+    </GestureDetector>
+  );
+}
+
 // ── DraggableGrid ─────────────────────────────────────────────
 
 interface DraggableGridProps {
@@ -290,147 +480,39 @@ function DraggableGrid({
   onReorder,
   onMenuPress,
 }: DraggableGridProps) {
-  const COL = 2;
-  const MARGIN_H = (effectiveW - cardW * COL) / (COL + 1);
-  const [orderedItems, setOrderedItems] = useState(items);
+  const marginH = (effectiveW - cardW * COL) / (COL + 1);
 
-  useEffect(() => { setOrderedItems(items); }, [items]);
+  const [internalItems, setInternalItems] = useState(items);
+  const positions = useSharedValue<Record<string, number>>({});
+  const itemsLength = useSharedValue(items.length);
 
-  const itemsLength = useSharedValue(orderedItems.length);
-  useEffect(() => { itemsLength.value = orderedItems.length; }, [orderedItems]);
+  useEffect(() => {
+    const newPositions: Record<string, number> = {};
+    items.forEach((item, index) => {
+      const id = item.type === "new" ? "new" : item.journal.id;
+      newPositions[id] = index;
+    });
+    positions.value = newPositions;
+    setInternalItems(items);
+    itemsLength.value = items.length;
+  }, [items]);
 
   const scrollOffset = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => { scrollOffset.value = e.contentOffset.y; },
   });
 
-  function getPosition(idx: number) {
-    const row = Math.floor(idx / COL);
-    const col = idx % COL;
-    return { x: MARGIN_H + col * (cardW + MARGIN_H), y: row * (cardH + COL_GAP) };
-  }
+  const handleDragEnd = useCallback((newPositions: Record<string, number>) => {
+    const sorted = [...internalItems].sort((a, b) => {
+      const idA = a.type === "new" ? "new" : a.journal.id;
+      const idB = b.type === "new" ? "new" : b.journal.id;
+      return (newPositions[idA] ?? 0) - (newPositions[idB] ?? 0);
+    });
+    setInternalItems(sorted);
+    onReorder(sorted);
+  }, [internalItems, onReorder]);
 
-  function swapItems(fromIdx: number, toIdx: number) {
-    if (fromIdx === toIdx) return;
-    const newItems = [...orderedItems];
-    if (newItems[0]?.type === "new" && (fromIdx === 0 || toIdx === 0)) return;
-    const tmp = newItems[fromIdx];
-    newItems[fromIdx] = newItems[toIdx];
-    newItems[toIdx] = tmp;
-    setOrderedItems(newItems);
-    onReorder(newItems);
-  }
-
-  function DraggableItem({ item, index }: { item: GridItem; index: number }) {
-    const pos = getPosition(index);
-    const scale = useSharedValue(1);
-    const itemTX = useSharedValue(0);
-    const itemTY = useSharedValue(0);
-    const zIndex = useSharedValue(1);
-
-    // ── "New journal" tile ──
-    if (item.type === "new") {
-      const newTap = Gesture.Tap().onEnd(() => {
-        runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
-        runOnJS(router.push)("/journal/new");
-      });
-      return (
-        <GestureDetector gesture={newTap}>
-          <Animated.View style={{ position: "absolute", left: pos.x, top: pos.y }}>
-            <View style={{ marginBottom: COL_GAP }}>
-              <NewJournalTile cardW={cardW} cardH={cardH} />
-            </View>
-          </Animated.View>
-        </GestureDetector>
-      );
-    }
-
-    // ── Journal card ──
-    const journal = item.journal;
-
-    const navigate = () => {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      router.push({
-        pathname: "/journal/[id]",
-        params: { id: journal.id, title: journal.title, isPrivate: String(journal.isPrivate) },
-      });
-    };
-
-    const openMenu = () => {
-      Haptics.selectionAsync();
-      onMenuPress(journal);
-    };
-
-    // Quick tap → navigate. Long press activates pan → drag.
-    const tap = Gesture.Tap().maxDuration(400).onEnd(() => { runOnJS(navigate)(); });
-    const pan = Gesture.Pan()
-      .activateAfterLongPress(400)
-      .onStart(() => {
-        "worklet";
-        scale.value = withSpring(1.08);
-        zIndex.value = 999;
-        runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
-      })
-      .onUpdate((e) => {
-        "worklet";
-        itemTX.value = e.translationX;
-        itemTY.value = e.translationY;
-      })
-      .onEnd((e) => {
-        "worklet";
-        const absX = pos.x + e.translationX + (cardW / 2);
-        const absY = pos.y + e.translationY + (cardH / 2);
-        const targetCol = Math.min(COL - 1, Math.max(0, Math.round((absX - MARGIN_H) / (cardW + MARGIN_H))));
-        const targetRow = Math.max(0, Math.round(absY / (cardH + COL_GAP)));
-        const targetIdx = Math.min(itemsLength.value - 1, targetRow * COL + targetCol);
-        itemTX.value = withSpring(0);
-        itemTY.value = withSpring(0);
-        scale.value = withSpring(1);
-        zIndex.value = 1;
-        runOnJS(swapItems)(index, targetIdx);
-      });
-
-    // Race: first gesture to activate wins. Tap wins on quick press, pan wins after long hold.
-    const cardGesture = Gesture.Race(tap, pan);
-    // 3-dot menu: separate gesture so it never reaches cardGesture
-    const menuTap = Gesture.Tap().onEnd(() => { runOnJS(openMenu)(); });
-
-    const animStyle = useAnimatedStyle(() => ({
-      transform: [{ translateX: itemTX.value }, { translateY: itemTY.value }, { scale: scale.value }],
-      zIndex: zIndex.value,
-    }));
-
-    return (
-      <GestureDetector gesture={cardGesture}>
-        <Animated.View style={[{ position: "absolute", left: pos.x, top: pos.y }, animStyle]}>
-          <View style={{ marginBottom: COL_GAP }}>
-            <View style={{ position: "relative" }}>
-              <JournalCover journal={journal} cardW={cardW} cardH={cardH} />
-              <GestureDetector gesture={menuTap}>
-                <Animated.View
-                  style={styles.menuDotBtn}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Feather name="more-vertical" size={14} color="#fff" />
-                </Animated.View>
-              </GestureDetector>
-            </View>
-            <Text
-              style={[styles.journalName, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}
-              numberOfLines={1}
-            >
-              {journal.title}
-            </Text>
-            <Text style={[styles.journalMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-              {journal.pageCount} {journal.pageCount === 1 ? "page" : "pages"} · {formatDate(journal.createdAt)}
-            </Text>
-          </View>
-        </Animated.View>
-      </GestureDetector>
-    );
-  }
-
-  const totalRows = Math.ceil(orderedItems.length / COL);
+  const totalRows = Math.ceil(internalItems.length / COL);
   const gridH = totalRows * (cardH + COL_GAP);
 
   return (
@@ -444,13 +526,24 @@ function DraggableGrid({
         >
           {ListHeader}
           <View style={{ height: gridH, position: "relative" }}>
-            {orderedItems.map((item, index) => (
-              <DraggableItem
-                key={item.type === "new" ? "new" : item.journal.id}
-                item={item}
-                index={index}
-              />
-            ))}
+            {internalItems.map((item) => {
+              const id = item.type === "new" ? "new" : item.journal.id;
+              return (
+                <DraggableItem
+                  key={id}
+                  item={item}
+                  id={id}
+                  positions={positions}
+                  itemsLength={itemsLength}
+                  cardW={cardW}
+                  cardH={cardH}
+                  marginH={marginH}
+                  colors={colors}
+                  onDragEnd={handleDragEnd}
+                  onMenuPress={onMenuPress}
+                />
+              );
+            })}
           </View>
         </Animated.ScrollView>
       </GestureHandlerRootView>
