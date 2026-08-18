@@ -222,6 +222,7 @@ export function CropEditor({ uri, onCrop, onCancel }: Props) {
   return (
     <View style={styles.root} onLayout={onLayout}>
       {/* Background image — always visible; onLoad gives us the real visual dims */}
+      {/* @ts-ignore */}
       <Image
         source={{ uri }}
         style={StyleSheet.absoluteFill}

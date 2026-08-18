@@ -6,10 +6,13 @@ import {
   StyleSheet,
   View,
 } from "react-native";
-import Svg, { Path, Circle } from "react-native-svg";
+import * as SvgModule from "react-native-svg";
 
-const AnimatedPath = Animated.createAnimatedComponent(Path);
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const SvgComp = (SvgModule.default ?? SvgModule.Svg ?? SvgModule) as any;
+const PathComp = (SvgModule.Path ?? (SvgModule as any).default?.Path) as any;
+const CircleComp = (SvgModule.Circle ?? (SvgModule as any).default?.Circle) as any;
+const AnimatedPath = Animated.createAnimatedComponent(PathComp);
+const AnimatedCircle = Animated.createAnimatedComponent(CircleComp);
 
 interface AnimatedSplashScreenProps {
   onAnimationFinish?: () => void;
@@ -65,35 +68,30 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
       ]),
 
       // 2. Letters draw sequentially (Fast pen strokes: ~180-240ms each)
-      // M
       Animated.timing(animM, {
         toValue: 1,
         duration: 260,
         useNativeDriver: false,
         easing: Easing.inOut(Easing.quad),
       }),
-      // a
       Animated.timing(animA, {
         toValue: 1,
         duration: 200,
         useNativeDriver: false,
         easing: Easing.inOut(Easing.quad),
       }),
-      // r
       Animated.timing(animR, {
         toValue: 1,
         duration: 180,
         useNativeDriver: false,
         easing: Easing.inOut(Easing.quad),
       }),
-      // g
       Animated.timing(animG, {
         toValue: 1,
         duration: 220,
         useNativeDriver: false,
         easing: Easing.inOut(Easing.quad),
       }),
-      // i + dot
       Animated.parallel([
         Animated.timing(animI, {
           toValue: 1,
@@ -111,7 +109,6 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
           }),
         ]),
       ]),
-      // n
       Animated.timing(animN, {
         toValue: 1,
         duration: 200,
@@ -151,14 +148,28 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
         onAnimationFinish();
       }
     });
-  }, []);
+  }, [
+    animA,
+    animDot,
+    animG,
+    animI,
+    animM,
+    animN,
+    animR,
+    onAnimationFinish,
+    quillOpacity,
+    quillProgress,
+    quillScale,
+    screenOpacity,
+    screenScale,
+    subtitleOpacity,
+  ]);
 
   if (isDone) {
     return null;
   }
 
-  // Stroke dashoffset helpers:
-  // length specifies the total approximate perimeter / stroke length of each glyph
+  // Stroke dashoffset helper
   const strokeOffset = (anim: Animated.Value, length: number) => {
     return anim.interpolate({
       inputRange: [0, 1],
@@ -193,16 +204,16 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
             },
           ]}
         >
-          <Svg width={72} height={72} viewBox="0 0 100 100" fill="none">
+          <SvgComp width={72} height={72} viewBox="0 0 100 100" fill="none">
             {/* Soft subtle glow / shadow */}
-            <Path
+            <PathComp
               d="M32 82 C38 68 50 42 78 18 C72 26 64 33 60 41 C54 39 48 42 45 47 C41 46 37 49 35 55 C32 60 30 68 32 82 Z"
               fill={ACCENT_SAGE}
               opacity={0.15}
               transform="translate(1, 2)"
             />
             {/* Main Quill Body & Vane */}
-            <Path
+            <PathComp
               d="M32 82 C38 68 50 42 78 18 C72 26 64 33 60 41 C54 39 48 42 45 47 C41 46 37 49 35 55 C32 60 30 68 32 82 Z"
               fill={ACCENT_SAGE}
             />
@@ -213,19 +224,19 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeDasharray={[85, 85]}
-              strokeDashoffset={strokeOffset(quillProgress, 85)}
+              strokeDashoffset={strokeOffset(quillProgress, 85) as any}
             />
             {/* Pen Nib Tip */}
-            <Path
+            <PathComp
               d="M30 84 L33 79 L27 81 Z"
               fill={INK_COLOR}
             />
-          </Svg>
+          </SvgComp>
         </Animated.View>
 
         {/* ── 2. Calligraphic Pen-Drawn Wordmark "Margin" ── */}
         <View style={styles.svgWrapper}>
-          <Svg width={300} height={90} viewBox="0 0 300 90" fill="none">
+          <SvgComp width={300} height={90} viewBox="0 0 300 90" fill="none">
             {/* Letter 'M' (Length ~260) */}
             <AnimatedPath
               d="M 28 65 L 28 25 M 24 25 L 34 25 M 28 25 L 48 65 L 68 25 M 68 25 L 68 65 M 63 65 L 73 65 M 23 65 L 33 65"
@@ -234,7 +245,7 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeDasharray={[280, 280]}
-              strokeDashoffset={strokeOffset(animM, 280)}
+              strokeDashoffset={strokeOffset(animM, 280) as any}
             />
 
             {/* Letter 'a' (Length ~170) */}
@@ -245,7 +256,7 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeDasharray={[190, 190]}
-              strokeDashoffset={strokeOffset(animA, 190)}
+              strokeDashoffset={strokeOffset(animA, 190) as any}
             />
 
             {/* Letter 'r' (Length ~110) */}
@@ -256,7 +267,7 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeDasharray={[130, 130]}
-              strokeDashoffset={strokeOffset(animR, 130)}
+              strokeDashoffset={strokeOffset(animR, 130) as any}
             />
 
             {/* Letter 'g' (Length ~230) */}
@@ -267,7 +278,7 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeDasharray={[240, 240]}
-              strokeDashoffset={strokeOffset(animG, 240)}
+              strokeDashoffset={strokeOffset(animG, 240) as any}
             />
 
             {/* Letter 'i' (Stem Length ~70) */}
@@ -278,7 +289,7 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeDasharray={[90, 90]}
-              strokeDashoffset={strokeOffset(animI, 90)}
+              strokeDashoffset={strokeOffset(animI, 90) as any}
             />
             {/* Tittle Dot for 'i' */}
             <AnimatedCircle
@@ -286,7 +297,7 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
               cy="28"
               r="2.4"
               fill={ACCENT_SAGE}
-              opacity={animDot}
+              opacity={animDot as any}
             />
 
             {/* Letter 'n' (Length ~180) */}
@@ -297,9 +308,9 @@ export function AnimatedSplashScreen({ onAnimationFinish }: AnimatedSplashScreen
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeDasharray={[200, 200]}
-              strokeDashoffset={strokeOffset(animN, 200)}
+              strokeDashoffset={strokeOffset(animN, 200) as any}
             />
-          </Svg>
+          </SvgComp>
         </View>
 
         {/* ── 3. Minimalist Editorial Subtitle ── */}

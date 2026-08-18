@@ -2,5 +2,8 @@
   "extends": "./tsconfig.base.json",
   "compileOnSave": false,
   "files": [],
-  "references": []
+  "references": [
+    { "path": "./artifacts/margin" },
+    { "path": "./scripts" }
+  ]
 }

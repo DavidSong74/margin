@@ -13,6 +13,23 @@ interface AnimatedSplashScreenV2Props {
   onAnimationFinish?: () => void;
 }
 
+interface LetterAnim {
+  opacity: Animated.Value;
+  translateY: Animated.Value;
+}
+
+const LETTERS = ["M", "a", "r", "g", "i", "n"] as const;
+const INK_COLOR = "#332c25";
+const ACCENT_SAGE = "#63805d";
+const PAPER_BG = "#faf7f2";
+
+// React 19 icon component compatibility
+const FeatherIcon = Feather as unknown as React.ComponentType<{
+  name: string;
+  size: number;
+  color: string;
+}>;
+
 export function AnimatedSplashScreenV2({ onAnimationFinish }: AnimatedSplashScreenV2Props) {
   const [isDone, setIsDone] = useState(false);
 
@@ -25,8 +42,8 @@ export function AnimatedSplashScreenV2({ onAnimationFinish }: AnimatedSplashScre
   const quillTranslateY = useRef(new Animated.Value(-20)).current;
 
   // Letter animations (M, a, r, g, i, n)
-  const letterAnimValues = useRef(
-    Array.from({ length: 6 }).map(() => ({
+  const letterAnimValues = useRef<LetterAnim[]>(
+    LETTERS.map(() => ({
       opacity: new Animated.Value(0),
       translateY: new Animated.Value(15),
     }))
@@ -109,16 +126,11 @@ export function AnimatedSplashScreenV2({ onAnimationFinish }: AnimatedSplashScre
         onAnimationFinish();
       }
     });
-  }, []);
+  }, [letterAnimValues, onAnimationFinish, quillOpacity, quillTranslateY, screenOpacity, screenScale, subtitleOpacity]);
 
   if (isDone) {
     return null;
   }
-
-  const INK_COLOR = "#332c25";
-  const ACCENT_SAGE = "#63805d";
-  const PAPER_BG = "#faf7f2";
-  const letters = ["M", "a", "r", "g", "i", "n"];
 
   return (
     <Animated.View
@@ -133,7 +145,7 @@ export function AnimatedSplashScreenV2({ onAnimationFinish }: AnimatedSplashScre
       pointerEvents="none"
     >
       <View style={styles.content}>
-        {/* ── 1. Quill Emblem (Using clean vector icon instead of broken SVG) ── */}
+        {/* ── 1. Quill Emblem ── */}
         <Animated.View
           style={[
             styles.quillContainer,
@@ -143,26 +155,30 @@ export function AnimatedSplashScreenV2({ onAnimationFinish }: AnimatedSplashScre
             },
           ]}
         >
-          <Feather name="feather" size={56} color={ACCENT_SAGE} />
+          <FeatherIcon name="feather" size={56} color={ACCENT_SAGE} />
         </Animated.View>
 
         {/* ── 2. Elegant Typography Wordmark ── */}
         <View style={styles.wordmarkContainer}>
-          {letters.map((letter, index) => (
-            <Animated.Text
-              key={index}
-              style={[
-                styles.letter,
-                { color: INK_COLOR },
-                {
-                  opacity: letterAnimValues[index].opacity,
-                  transform: [{ translateY: letterAnimValues[index].translateY }],
-                },
-              ]}
-            >
-              {letter}
-            </Animated.Text>
-          ))}
+          {LETTERS.map((letter, index) => {
+            const anim = letterAnimValues[index];
+            if (!anim) return null;
+            return (
+              <Animated.Text
+                key={letter + index}
+                style={[
+                  styles.letter,
+                  {
+                    color: INK_COLOR,
+                    opacity: anim.opacity,
+                    transform: [{ translateY: anim.translateY }],
+                  },
+                ]}
+              >
+                {letter}
+              </Animated.Text>
+            );
+          })}
         </View>
 
         {/* ── 3. Minimalist Editorial Subtitle ── */}

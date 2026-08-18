@@ -68,6 +68,7 @@
     "expo-print": "^57.0.1",
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "~14.0.8",
-    "react-native-drag-sort": "^2.4.4"
+    "react-native-drag-sort": "^2.4.4",
+    "react-native-url-polyfill": "^4.0.0"
   }
 }

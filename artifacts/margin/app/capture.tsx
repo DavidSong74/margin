@@ -450,6 +450,7 @@ export default function CaptureScreen() {
     const frameTop = (SCREEN_H - FRAME_H) / 2 - 20; // slight offset above center
     return (
       <View style={styles.bg}>
+        {/* @ts-ignore React 19 typing issue */}
         <CameraView
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
@@ -579,6 +580,7 @@ export default function CaptureScreen() {
   if (screen === "preview" && capturedUri) {
     return (
       <View style={styles.bg}>
+        {/* @ts-ignore React 19 typing issue */}
         <Image
           source={{ uri: capturedUri }}
           style={StyleSheet.absoluteFill}
@@ -649,11 +651,14 @@ export default function CaptureScreen() {
     return (
       <View style={styles.bg}>
         {capturedUri && (
-          <Image
-            source={{ uri: capturedUri }}
-            style={[StyleSheet.absoluteFill, { opacity: 0.35 }]}
-            contentFit="contain"
-          />
+          <>
+            {/* @ts-ignore React 19 typing issue */}
+            <Image
+              source={{ uri: capturedUri }}
+              style={[StyleSheet.absoluteFill, { opacity: 0.35 }]}
+              contentFit="contain"
+            />
+          </>
         )}
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#fff" />

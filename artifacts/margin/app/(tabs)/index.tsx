@@ -31,6 +31,7 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   runOnJS,
+  useAnimatedScrollHandler,
 } from "react-native-reanimated";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import { ScrollView } from "react-native";
@@ -386,6 +387,11 @@ function DraggableGrid({
   // Keep in sync when items prop changes externally (e.g., after load)
   useEffect(() => { setOrderedItems(items); }, [items]);
 
+  const itemsLength = useSharedValue(orderedItems.length);
+  useEffect(() => {
+    itemsLength.value = orderedItems.length;
+  }, [orderedItems]);
+
   function getPosition(idx: number) {
     const row = Math.floor(idx / COL);
     const col = idx % COL;
@@ -395,27 +401,21 @@ function DraggableGrid({
     };
   }
 
-  function getIndexFromXY(x: number, y: number, scrollY: number) {
-    const absY = y + scrollY;
-    const col = Math.min(COL - 1, Math.max(0, Math.round((x - MARGIN_H) / (cardW + MARGIN_H))));
-    const row = Math.max(0, Math.round(absY / (cardH + COL_GAP)));
-    return Math.min(orderedItems.length - 1, row * COL + col);
-  }
-
   // Per-item drag state
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
   const isActive = useSharedValue(false);
-  const scrollOffset = useRef(0);
-  const draggingRef = useRef<number | null>(null);
-  const startX = useSharedValue(0);
-  const startY = useSharedValue(0);
+  
+  const scrollOffset = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollOffset.value = e.contentOffset.y;
+    },
+  });
 
   function swapItems(fromIdx: number, toIdx: number) {
     if (fromIdx === toIdx) return;
     const newItems = [...orderedItems];
     // Don't allow moving "new" card (always first)
-    if (newItems[0].type === "new" && (fromIdx === 0 || toIdx === 0)) return;
+    if (newItems[0]?.type === "new" && (fromIdx === 0 || toIdx === 0)) return;
     const tmp = newItems[fromIdx];
     newItems[fromIdx] = newItems[toIdx];
     newItems[toIdx] = tmp;
@@ -431,14 +431,12 @@ function DraggableGrid({
     const zIndex = useSharedValue(1);
 
     const pan = Gesture.Pan()
-      .activateAfterLongPress(400)
+      .activateAfterLongPress(250) // Reduced from 400ms to fix "only drags on second try"
       .onStart(() => {
         "worklet";
         isActive.value = true;
         scale.value = withSpring(1.08);
         zIndex.value = 999;
-        startX.value = pos.x;
-        startY.value = pos.y;
         runOnJS(setDraggingIdx)(index);
         // haptic
         runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
@@ -452,16 +450,22 @@ function DraggableGrid({
       .onEnd((e) => {
         "worklet";
         isActive.value = false;
-        const targetIdx = runOnJS(getIndexFromXY)(
-          pos.x + e.translationX + cardW / 2,
-          pos.y + e.translationY + cardH / 2,
-          scrollOffset.current,
-        );
+        
+        // Calculate the drop target index on the UI thread
+        const absX = pos.x + e.translationX + (cardW / 2);
+        const absY = pos.y + e.translationY + (cardH / 2) + scrollOffset.value;
+        
+        const col = Math.min(COL - 1, Math.max(0, Math.round((absX - MARGIN_H) / (cardW + MARGIN_H))));
+        const row = Math.max(0, Math.round(absY / (cardH + COL_GAP)));
+        
+        const targetIdx = Math.min(itemsLength.value - 1, row * COL + col);
+        
         itemTX.value = withSpring(0);
         itemTY.value = withSpring(0);
         scale.value = withSpring(1);
         zIndex.value = 1;
-        runOnJS(swapItems)(index, targetIdx ?? index);
+        
+        runOnJS(swapItems)(index, targetIdx);
         runOnJS(setDraggingIdx)(null);
       });
 
@@ -496,10 +500,12 @@ function DraggableGrid({
   const gridH = totalRows * (cardH + COL_GAP);
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <ScrollView
+    <>
+      {/* @ts-ignore React 19 typing issue */}
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <Animated.ScrollView
         scrollEventThrottle={16}
-        onScroll={(e) => { scrollOffset.current = e.nativeEvent.contentOffset.y; }}
+        onScroll={scrollHandler}
         contentContainerStyle={{ paddingBottom: pb }}
       >
         {ListHeader}
@@ -512,8 +518,9 @@ function DraggableGrid({
             />
           ))}
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
     </GestureHandlerRootView>
+    </>
   );
 }
 

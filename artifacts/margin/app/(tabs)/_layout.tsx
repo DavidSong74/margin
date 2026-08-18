@@ -33,6 +33,7 @@ export default function TabLayout() {
         },
         tabBarBackground: () =>
           isIOS ? (
+            // @ts-ignore React 19 typing issue
             <BlurView
               intensity={90}
               tint={isDark ? "dark" : "extraLight"}
