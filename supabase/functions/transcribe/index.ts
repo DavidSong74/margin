@@ -234,39 +234,74 @@ async function callGemini(
   apiKey: string,
   body: Record<string, unknown>,
   model: string = GEMINI_MODEL_FLASH,
+  maxRetries = 3,
 ): Promise<string> {
-  const res = await fetch(`${geminiEndpoint(model)}?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let lastErr: unknown;
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`Gemini API error ${res.status}: ${errText.slice(0, 300)}`);
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+      const res = await fetch(`${geminiEndpoint(model)}?key=${apiKey}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Connection": "keep-alive",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        // If rate limited or server error, throw to trigger retry
+        if (res.status === 429 || res.status >= 500) {
+          throw new Error(`Gemini API error ${res.status}: ${errText.slice(0, 300)}`);
+        }
+        // Client errors (4xx other than 429) do not retry
+        throw new Error(`Gemini API error ${res.status}: ${errText.slice(0, 300)}`);
+      }
+
+      const data = await res.json();
+      // 2.5-pro returns thinking tokens as earlier parts; find the first real text part
+      const parts: Array<{ text?: string; thought?: boolean }> =
+        data?.candidates?.[0]?.content?.parts ?? [];
+      const textPart = parts.find((p) => typeof p.text === "string" && !p.thought);
+      const finishReason = data?.candidates?.[0]?.finishReason ?? "none";
+
+      // STOP with no text parts = Gemini saw the image but found nothing to transcribe (blank/empty crop)
+      if (!textPart && finishReason === "STOP") {
+        return "";
+      }
+
+      const text = textPart?.text;
+      if (typeof text !== "string") {
+        const blocked = data?.promptFeedback?.blockReason ?? "none";
+        const partTypes = parts.map((p) => (p.thought ? "thought" : "text")).join(",");
+        throw new Error(
+          `Gemini returned unexpected response shape. finishReason=${finishReason}, blockReason=${blocked}, partTypes=[${partTypes}]`
+        );
+      }
+      return text;
+    } catch (err: unknown) {
+      lastErr = err;
+      const isAbort = err instanceof Error && err.name === "AbortError";
+      console.warn(
+        `[transcribe] Gemini attempt ${attempt}/${maxRetries} failed (${isAbort ? "Timeout" : err instanceof Error ? err.message : String(err)}).`
+      );
+
+      if (attempt < maxRetries) {
+        // Exponential backoff: 1s, 2s, 4s...
+        const delayMs = Math.pow(2, attempt - 1) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
   }
 
-  const data = await res.json();
-  // 2.5-pro returns thinking tokens as earlier parts; find the first real text part
-  const parts: Array<{ text?: string; thought?: boolean }> =
-    data?.candidates?.[0]?.content?.parts ?? [];
-  const textPart = parts.find((p) => typeof p.text === "string" && !p.thought);
-  const finishReason = data?.candidates?.[0]?.finishReason ?? "none";
-
-  // STOP with no text parts = Gemini saw the image but found nothing to transcribe (blank/empty crop)
-  if (!textPart && finishReason === "STOP") {
-    return "";
-  }
-
-  const text = textPart?.text;
-  if (typeof text !== "string") {
-    const blocked = data?.promptFeedback?.blockReason ?? "none";
-    const partTypes = parts.map((p) => (p.thought ? "thought" : "text")).join(",");
-    throw new Error(
-      `Gemini returned unexpected response shape. finishReason=${finishReason}, blockReason=${blocked}, partTypes=[${partTypes}]`
-    );
-  }
-  return text;
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 function json(body: unknown, status = 200): Response {
