@@ -32,6 +32,10 @@
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO"
       ]
     },
@@ -64,6 +68,12 @@
         "projectId": "502baed6-cc42-4602-8e21-c66f93931d62"
       }
     },
-    "owner": "davidsong74"
+    "owner": "davidsong74",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/502baed6-cc42-4602-8e21-c66f93931d62"
+    }
   }
 }
