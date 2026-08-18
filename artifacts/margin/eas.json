@@ -21,6 +21,9 @@
       "ios": {
         "simulator": false
       },
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "APP_ENV": "preview"
       }
