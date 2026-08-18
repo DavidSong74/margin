@@ -97,7 +97,9 @@ function serveStaticFile(urlPath, res) {
   const safePath = path.normalize(urlPath).replace(/^(\.\.(\/|\\|$))+/, "");
   const filePath = path.join(STATIC_ROOT, safePath);
 
-  if (!filePath.startsWith(STATIC_ROOT)) {
+  // Ensure trailing separator to avoid matching sibling directories starting with same prefix
+  const rootWithSep = STATIC_ROOT.endsWith(path.sep) ? STATIC_ROOT : STATIC_ROOT + path.sep;
+  if (!filePath.startsWith(rootWithSep) && filePath !== STATIC_ROOT) {
     res.writeHead(403);
     res.end("Forbidden");
     return;

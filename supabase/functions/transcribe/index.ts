@@ -196,6 +196,10 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── 8. Write results to database in a single update ────────
+    const wordCount = transcriptionText.trim()
+      ? transcriptionText.trim().split(/\s+/).length
+      : 0;
+
     const { error: updateErr } = await adminClient
       .from("pages")
       .update({
@@ -203,6 +207,7 @@ Deno.serve(async (req: Request) => {
         transcription_status: "done",
         pending_corrections: pendingCorrections,
         correction_count: pendingCorrections.length,
+        word_count: wordCount,
       })
       .eq("id", page_id);
 

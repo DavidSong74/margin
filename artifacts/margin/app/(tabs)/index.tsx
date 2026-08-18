@@ -26,6 +26,14 @@ import { supabase } from "@/lib/supabase";
 import type { Database } from "@/lib/database.types";
 import { COVER_COLORS } from "@/constants/colors";
 import { DatePicker } from "@quidone/react-native-wheel-picker";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  runOnJS,
+} from "react-native-reanimated";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import { ScrollView } from "react-native";
 
 const H_PAD = 20;
 const COL_GAP = 12;
@@ -293,11 +301,6 @@ const LibraryGridItem = React.memo(function LibraryGridItem({
               },
             });
           }}
-          onLongPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onMenuPress(item.journal);
-          }}
-          delayLongPress={400}
           activeOpacity={0.82}
         >
           <View style={{ position: "relative" }}>
@@ -349,6 +352,170 @@ const LibraryGridItem = React.memo(function LibraryGridItem({
     </View>
   );
 });
+
+// ── DraggableGrid ─────────────────────────────────────────────
+// New-Architecture-compatible drag-to-reorder grid using
+// react-native-reanimated + react-native-gesture-handler.
+
+interface DraggableGridProps {
+  items: GridItem[];
+  cardW: number;
+  cardH: number;
+  effectiveW: number;
+  pb: number;
+  ListHeader: React.ReactNode;
+  renderItem: (args: { item: GridItem }) => React.ReactNode;
+  onReorder: (newItems: GridItem[]) => void;
+}
+
+function DraggableGrid({
+  items,
+  cardW,
+  cardH,
+  effectiveW,
+  pb,
+  ListHeader,
+  renderItem,
+  onReorder,
+}: DraggableGridProps) {
+  const COL = 2;
+  const MARGIN_H = (effectiveW - cardW * COL) / (COL + 1);
+  const [orderedItems, setOrderedItems] = useState(items);
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+
+  // Keep in sync when items prop changes externally (e.g., after load)
+  useEffect(() => { setOrderedItems(items); }, [items]);
+
+  function getPosition(idx: number) {
+    const row = Math.floor(idx / COL);
+    const col = idx % COL;
+    return {
+      x: MARGIN_H + col * (cardW + MARGIN_H),
+      y: row * (cardH + COL_GAP),
+    };
+  }
+
+  function getIndexFromXY(x: number, y: number, scrollY: number) {
+    const absY = y + scrollY;
+    const col = Math.min(COL - 1, Math.max(0, Math.round((x - MARGIN_H) / (cardW + MARGIN_H))));
+    const row = Math.max(0, Math.round(absY / (cardH + COL_GAP)));
+    return Math.min(orderedItems.length - 1, row * COL + col);
+  }
+
+  // Per-item drag state
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const isActive = useSharedValue(false);
+  const scrollOffset = useRef(0);
+  const draggingRef = useRef<number | null>(null);
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+
+  function swapItems(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx) return;
+    const newItems = [...orderedItems];
+    // Don't allow moving "new" card (always first)
+    if (newItems[0].type === "new" && (fromIdx === 0 || toIdx === 0)) return;
+    const tmp = newItems[fromIdx];
+    newItems[fromIdx] = newItems[toIdx];
+    newItems[toIdx] = tmp;
+    setOrderedItems(newItems);
+    onReorder(newItems);
+  }
+
+  function DraggableItem({ item, index }: { item: GridItem; index: number }) {
+    const pos = getPosition(index);
+    const scale = useSharedValue(1);
+    const itemTX = useSharedValue(0);
+    const itemTY = useSharedValue(0);
+    const zIndex = useSharedValue(1);
+
+    const pan = Gesture.Pan()
+      .activateAfterLongPress(400)
+      .onStart(() => {
+        "worklet";
+        isActive.value = true;
+        scale.value = withSpring(1.08);
+        zIndex.value = 999;
+        startX.value = pos.x;
+        startY.value = pos.y;
+        runOnJS(setDraggingIdx)(index);
+        // haptic
+        runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
+      })
+      .onUpdate((e) => {
+        "worklet";
+        if (item.type === "new") return; // "new" card not draggable
+        itemTX.value = e.translationX;
+        itemTY.value = e.translationY;
+      })
+      .onEnd((e) => {
+        "worklet";
+        isActive.value = false;
+        const targetIdx = runOnJS(getIndexFromXY)(
+          pos.x + e.translationX + cardW / 2,
+          pos.y + e.translationY + cardH / 2,
+          scrollOffset.current,
+        );
+        itemTX.value = withSpring(0);
+        itemTY.value = withSpring(0);
+        scale.value = withSpring(1);
+        zIndex.value = 1;
+        runOnJS(swapItems)(index, targetIdx ?? index);
+        runOnJS(setDraggingIdx)(null);
+      });
+
+    const animStyle = useAnimatedStyle(() => ({
+      transform: [
+        { translateX: itemTX.value },
+        { translateY: itemTY.value },
+        { scale: scale.value },
+      ],
+      zIndex: zIndex.value,
+    }));
+
+    // "new" card is not draggable
+    if (item.type === "new") {
+      return (
+        <View style={{ position: "absolute", left: pos.x, top: pos.y }}>
+          {renderItem({ item })}
+        </View>
+      );
+    }
+
+    return (
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[{ position: "absolute", left: pos.x, top: pos.y }, animStyle]}>
+          {renderItem({ item })}
+        </Animated.View>
+      </GestureDetector>
+    );
+  }
+
+  const totalRows = Math.ceil(orderedItems.length / COL);
+  const gridH = totalRows * (cardH + COL_GAP);
+
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ScrollView
+        scrollEventThrottle={16}
+        onScroll={(e) => { scrollOffset.current = e.nativeEvent.contentOffset.y; }}
+        contentContainerStyle={{ paddingBottom: pb }}
+      >
+        {ListHeader}
+        <View style={{ height: gridH, position: "relative", marginHorizontal: 0 }}>
+          {orderedItems.map((item, index) => (
+            <DraggableItem
+              key={item.type === "new" ? "new" : item.journal.id}
+              item={item}
+              index={index}
+            />
+          ))}
+        </View>
+      </ScrollView>
+    </GestureHandlerRootView>
+  );
+}
 
 // ── Main screen ──────────────────────────────────────────────
 
@@ -836,17 +1003,23 @@ export default function LibraryScreen() {
         onClose={() => setInboxVisible(false)}
         onNotificationsRead={() => setUnreadCount(0)}
       />
-      <FlatList
-        data={gridData}
-        keyExtractor={(item) =>
-          item.type === "new" ? "new" : item.journal.id
-        }
+      <DraggableGrid
+        items={gridData}
+        cardW={cardW}
+        cardH={cardH + 46}
+        effectiveW={effectiveW}
+        pb={pb}
+        ListHeader={ListHeader}
         renderItem={renderItem}
-        numColumns={2}
-        ListHeaderComponent={ListHeader}
-        contentContainerStyle={[styles.gridContent, { paddingBottom: pb }]}
-        columnWrapperStyle={styles.columnWrapper}
-        showsVerticalScrollIndicator={false}
+        onReorder={(newData) => {
+          const newJournals = newData.filter((d) => d.type === "journal").map((d) => d.journal);
+          setJournals(newJournals);
+          supabase.rpc("reorder_journals", {
+            p_journal_ids: newJournals.map(j => j.id)
+          }).then(({ error }) => {
+            if (error) console.error("Failed to persist reorder", error);
+          });
+        }}
       />
       
       {/* ── Journal context menu bottom sheet ── */}
@@ -974,6 +1147,7 @@ export default function LibraryScreen() {
                       const iso = parsed.toISOString();
                       await supabase.from("journals").update({ created_at: iso }).eq("id", menuJournal.id);
                       setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { ...j, createdAt: iso } : j));
+                      setMenuJournal((prev) => prev ? { ...prev, createdAt: iso } : null);
                     }}
                     itemTextStyle={{ color: colors.foreground, fontFamily: "Inter_400Regular", fontSize: 16 }}
                     overlayItemStyle={{ backgroundColor: colors.border, opacity: 0.5, borderRadius: 8 }}

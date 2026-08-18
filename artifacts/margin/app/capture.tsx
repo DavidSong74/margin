@@ -262,13 +262,16 @@ export default function CaptureScreen() {
       const user = session?.user;
       if (!user) throw new Error("Not authenticated");
 
-      // Determine page number — query DB only on first shot; increment locally after
+      // Determine page number — query DB for highest page_number on first shot; increment locally after
       if (startPageNumber === null) {
-        const { count } = await supabase
+        const { data: maxPageData } = await supabase
           .from("pages")
-          .select("*", { count: "exact", head: true })
-          .eq("journal_id", journal_id);
-        const base = (count ?? 0) + 1;
+          .select("page_number")
+          .eq("journal_id", journal_id)
+          .order("page_number", { ascending: false })
+          .limit(1);
+        const maxPage = maxPageData?.[0]?.page_number ?? 0;
+        const base = maxPage + 1;
         setStartPageNumber(base);
         pageNumber = base + batchCount;
       } else {

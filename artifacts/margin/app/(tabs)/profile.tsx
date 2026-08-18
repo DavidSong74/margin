@@ -2,7 +2,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
-import * as Notifications from "expo-notifications";
+// NOTE: expo-notifications is not supported in Expo Go SDK 53+.
+// Import lazily and catch errors so the app doesn't crash in Expo Go.
+let Notifications: typeof import("expo-notifications") | null = null;
+try {
+  Notifications = require("expo-notifications");
+} catch {}
+
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Sharing from "expo-sharing";
 import Constants from "expo-constants";
@@ -30,6 +36,7 @@ import { useColors } from "@/hooks/useColors";
 import { useTheme, type ThemeOption } from "@/hooks/useTheme";
 import { supabase } from "@/lib/supabase";
 import { COVER_COLORS } from "@/constants/colors";
+import { exportJournalToPdf } from "@/lib/pdfExport";
 
 // ─── Reusable primitives ─────────────────────────────────────────────────────
 
@@ -807,6 +814,7 @@ export default function ProfileScreen() {
   // ── Notification helpers ──────────────────────────────────────────────────
 
   async function requestNotificationPermission(): Promise<boolean> {
+    if (!Notifications) return false;
     const { status: existing } = await Notifications.getPermissionsAsync();
     if (existing === "granted") return true;
     const { status } = await Notifications.requestPermissionsAsync();
@@ -820,6 +828,7 @@ export default function ProfileScreen() {
     title: string,
     body: string,
   ) {
+    if (!Notifications) return;
     await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => {});
     await Notifications.scheduleNotificationAsync({
       identifier,
@@ -850,6 +859,50 @@ export default function ProfileScreen() {
         },
       ]
     );
+  }
+
+  const [exporting, setExporting] = useState(false);
+
+  async function handleExportPdf() {
+    if (exporting) return;
+    try {
+      const { data: journals, error } = await supabase
+        .from("journals")
+        .select("id, title")
+        .is("deleted_at", null)
+        .order("title");
+
+      if (error) throw error;
+      if (!journals || journals.length === 0) {
+        Alert.alert("No journals", "You do not have any active journals to export.");
+        return;
+      }
+
+      Alert.alert(
+        "Export Journal to PDF",
+        "Select a journal to create a formatted, printable PDF archive:",
+        [
+          ...journals.map((j) => ({
+            text: j.title,
+            onPress: async () => {
+              try {
+                setExporting(true);
+                await exportJournalToPdf(j.id, j.title);
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : "Export failed";
+                Alert.alert("Export error", msg);
+              } finally {
+                setExporting(false);
+              }
+            },
+          })),
+          { text: "Cancel", style: "cancel" as const },
+        ]
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Could not load journals";
+      Alert.alert("Error", msg);
+    }
   }
 
   if (!prefsLoaded) return <View style={[styles.root, { backgroundColor: colors.background }]} />;
@@ -931,7 +984,7 @@ export default function ProfileScreen() {
                   "Time to write ✍️", "Your journal is waiting.",
                 );
               } else {
-                await Notifications.cancelScheduledNotificationAsync("margin:daily_reminder").catch(() => {});
+                await Notifications?.cancelScheduledNotificationAsync("margin:daily_reminder").catch(() => {});
               }
               setDailyReminder(v);
               savePref({ dailyReminder: v });
@@ -996,7 +1049,7 @@ export default function ProfileScreen() {
                   "On this day", "You wrote something worth revisiting a year ago.",
                 );
               } else {
-                await Notifications.cancelScheduledNotificationAsync("margin:on_this_day").catch(() => {});
+                await Notifications?.cancelScheduledNotificationAsync("margin:on_this_day").catch(() => {});
               }
               setOnThisDay(v);
               savePref({ onThisDay: v });
@@ -1031,19 +1084,19 @@ export default function ProfileScreen() {
                   Alert.alert("Permission required", "Enable notifications in your device settings.");
                   return;
                 }
-                await Notifications.cancelScheduledNotificationAsync("margin:weekly_digest").catch(() => {});
-                await Notifications.scheduleNotificationAsync({
+                await Notifications?.cancelScheduledNotificationAsync("margin:weekly_digest").catch(() => {});
+                await Notifications?.scheduleNotificationAsync({
                   identifier: "margin:weekly_digest",
                   content: { title: "Your week in Margin", body: "See what you wrote this week.", sound: true },
                   trigger: {
-                    type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+                    type: Notifications?.SchedulableTriggerInputTypes.WEEKLY,
                     weekday: 1,
                     hour: 10,
                     minute: 0,
                   },
                 });
               } else {
-                await Notifications.cancelScheduledNotificationAsync("margin:weekly_digest").catch(() => {});
+                await Notifications?.cancelScheduledNotificationAsync("margin:weekly_digest").catch(() => {});
               }
               setWeeklyDigest(v);
               savePref({ weeklyDigest: v });
@@ -1166,7 +1219,6 @@ export default function ProfileScreen() {
             icon="type"
             label="Text size"
             value={readerFontSize.charAt(0).toUpperCase() + readerFontSize.slice(1)}
-            last
             onPress={() => {
               const OPTIONS: { key: ReaderFontSize; label: string }[] = [
                 { key: "small",  label: "Small"  },
@@ -1185,6 +1237,12 @@ export default function ProfileScreen() {
                 ]
               );
             }}
+          />
+          <Row
+            icon="share"
+            label={exporting ? "Generating PDF…" : "Export Journal to PDF"}
+            last
+            onPress={handleExportPdf}
           />
         </SectionCard>
 

@@ -475,9 +475,18 @@ export default function JournalReaderScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      fetchPages();
-    }, [fetchPages])
+      if (privacyState === "unlocked") {
+        fetchPages();
+      }
+    }, [fetchPages, privacyState])
   );
+
+  // Trigger fetch once biometric / privacy check unlocks
+  useEffect(() => {
+    if (privacyState === "unlocked") {
+      fetchPages();
+    }
+  }, [privacyState, fetchPages]);
 
   // ── Privacy gate: fetch is_private then trigger biometric ────
   // Runs once on mount (not re-run on focus, so auth is only asked once per session).

@@ -395,6 +395,10 @@ export interface Database {
         Args: { p_journal_id: string; p_page_ids: string[] };
         Returns: undefined;
       };
+      reorder_journals: {
+        Args: { p_journal_ids: string[] };
+        Returns: undefined;
+      };
       get_journals_with_counts: {
         Args: Record<string, never>;
         Returns: Array<{
@@ -405,6 +409,7 @@ export interface Database {
           cover_image_url: string | null;
           is_private: boolean;
           created_at: string;
+          sort_order: number;
           page_count: number;
           pending_count: number;
         }>;
