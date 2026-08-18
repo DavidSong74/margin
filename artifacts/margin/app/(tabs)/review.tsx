@@ -3,6 +3,7 @@ import { useFocusEffect, router } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
+  DeviceEventEmitter,
   Platform,
   Pressable,
   ScrollView,
@@ -58,7 +59,13 @@ export default function ReviewScreen() {
       const { data, error } = await supabase.rpc("get_resurface_page");
       if (error) throw error;
       const rows = data as ResurfacePage[] | null;
-      setPage(rows && rows.length > 0 ? rows[0] : null);
+      if (rows && rows.length > 0) {
+        setPage(rows[0]);
+        DeviceEventEmitter.emit("review_queue_updated", true);
+      } else {
+        setPage(null);
+        DeviceEventEmitter.emit("review_queue_updated", false);
+      }
     } catch (err) {
       console.error("[Review] get_resurface_page error:", err);
       setPage(null);

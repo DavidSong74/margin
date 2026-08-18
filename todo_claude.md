@@ -433,3 +433,114 @@ $$;
 * **D2 (iCloud Backup):** Enable `ios.supportsDocumentBrowser: true` in `app.json` and generate `margin_backup.zip` inside `FileSystem.documentDirectory`.
 * **D3 (Google Drive Backup):** Implement `lib/googleDrive.ts` uploading encrypted backup JSON to Google Drive `appDataFolder` via OAuth token.
 * **D4 (Home Screen Widget):** Expo Widget extension storing daily streak and "On This Day" entry memory in `AppGroup` shared container.
+
+### FEAT-03. Add Unread Indicator (Red Dot) to Review Tab
+
+* **Target Files:**
+  - `artifacts/margin/app/(tabs)/_layout.tsx`
+  - `artifacts/margin/app/(tabs)/review.tsx`
+* **Priority:** 🟢 Low Priority (UI/UX)
+
+#### Problem
+Currently, users don't know if they have a page to review until they tap the "Review" tab. A subtle red dot should appear on the Review tab icon if `get_resurface_page` has a pending entry.
+
+#### Exact Implementation Specification
+1. In `artifacts/margin/app/(tabs)/review.tsx`, import `DeviceEventEmitter` from `react-native` and modify `fetchPage` to broadcast its result globally:
+   ```tsx
+   import { DeviceEventEmitter } from "react-native";
+
+   // Inside ReviewScreen's fetchPage:
+   const fetchPage = useCallback(async () => {
+     try {
+       const { data, error } = await supabase.rpc("get_resurface_page");
+       if (error) throw error;
+       const rows = data as ResurfacePage[] | null;
+       if (rows && rows.length > 0) {
+         setPage(rows[0]);
+         DeviceEventEmitter.emit("review_queue_updated", true);
+       } else {
+         setPage(null);
+         DeviceEventEmitter.emit("review_queue_updated", false);
+       }
+     } catch (err) {
+       console.error("[Review] get_resurface_page error:", err);
+       setPage(null);
+     }
+   }, []);
+   ```
+
+2. In `artifacts/margin/app/(tabs)/_layout.tsx`, add state to track if a review is available. Use a `useEffect` to fetch this on mount and on AppState changes (returning to foreground). Additionally, clear the indicator immediately if the user navigates to the Review tab:
+   ```tsx
+   import { AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
+   import { usePathname } from "expo-router";
+
+   // ... inside TabLayout component:
+   const [hasReview, setHasReview] = useState(false);
+   const pathname = usePathname();
+
+   const checkReview = useCallback(async () => {
+     try {
+       const { data } = await supabase.rpc("get_resurface_page");
+       setHasReview(Array.isArray(data) && data.length > 0);
+     } catch {
+       setHasReview(false);
+     }
+   }, []);
+
+   // Dismiss red dot if user focuses the Review tab
+   useEffect(() => {
+     if (pathname === "/review") {
+       setHasReview(false);
+     }
+   }, [pathname]);
+
+   useEffect(() => {
+     // Don't show dot if they are already on the Review tab
+     if (pathname !== "/review") {
+       checkReview();
+     }
+     
+     const appStateSub = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+       if (nextAppState === "active" && pathname !== "/review") checkReview();
+     });
+     
+     const eventSub = DeviceEventEmitter.addListener("review_queue_updated", (hasItems: boolean) => {
+       if (pathname !== "/review") setHasReview(hasItems);
+     });
+
+     return () => {
+       appStateSub.remove();
+       eventSub.remove();
+     };
+   }, [checkReview, pathname]);
+   ```
+
+3. Update the `Tabs.Screen` for `review` in `_layout.tsx` to render the red dot badge directly inside `tabBarIcon` for precise placement:
+   ```tsx
+   <Tabs.Screen
+     name="review"
+     options={{
+       title: "Review",
+       tabBarIcon: ({ color }) => (
+         <View>
+           <Feather name="star" size={20} color={color} />
+           {hasReview && (
+             <View
+               style={{
+                 position: "absolute",
+                 top: -2,
+                 right: -4,
+                 width: 8,
+                 height: 8,
+                 borderRadius: 4,
+                 backgroundColor: colors.destructive || "#ef4444",
+                 borderWidth: 1.5,
+                 borderColor: isIOS ? "transparent" : colors.background,
+               }}
+             />
+           )}
+         </View>
+       ),
+     }}
+   />
+   ```

@@ -1,11 +1,13 @@
 import { BlurView } from "expo-blur";
-import { Tabs } from "expo-router";
+import { Tabs, usePathname } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
+import React, { useState, useEffect, useCallback } from "react";
+import { Platform, StyleSheet, View, useColorScheme, AppState, AppStateStatus, DeviceEventEmitter } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
 import { useTheme } from "@/hooks/useTheme";
+import { supabase } from "@/lib/supabase";
 
 export default function TabLayout() {
   const colors = useColors();
@@ -15,6 +17,45 @@ export default function TabLayout() {
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const insets = useSafeAreaInsets();
+
+  const [hasReview, setHasReview] = useState(false);
+  const pathname = usePathname();
+
+  const checkReview = useCallback(async () => {
+    try {
+      const { data } = await supabase.rpc("get_resurface_page");
+      setHasReview(Array.isArray(data) && data.length > 0);
+    } catch {
+      setHasReview(false);
+    }
+  }, []);
+
+  // Dismiss red dot if user focuses the Review tab
+  useEffect(() => {
+    if (pathname === "/review") {
+      setHasReview(false);
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    // Don't show dot if they are already on the Review tab
+    if (pathname !== "/review") {
+      checkReview();
+    }
+    
+    const appStateSub = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+      if (nextAppState === "active" && pathname !== "/review") checkReview();
+    });
+    
+    const eventSub = DeviceEventEmitter.addListener("review_queue_updated", (hasItems: boolean) => {
+      if (pathname !== "/review") setHasReview(hasItems);
+    });
+
+    return () => {
+      appStateSub.remove();
+      eventSub.remove();
+    };
+  }, [checkReview, pathname]);
 
   return (
     <Tabs
@@ -77,7 +118,24 @@ export default function TabLayout() {
         options={{
           title: "Review",
           tabBarIcon: ({ color }) => (
-            <Feather name="star" size={20} color={color} />
+            <View>
+              <Feather name="star" size={20} color={color} />
+              {hasReview && (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: -2,
+                    right: -4,
+                    width: 8,
+                    height: 8,
+                    borderRadius: 4,
+                    backgroundColor: colors.destructive || "#ef4444",
+                    borderWidth: 1.5,
+                    borderColor: isIOS ? "transparent" : colors.background,
+                  }}
+                />
+              )}
+            </View>
           ),
         }}
       />

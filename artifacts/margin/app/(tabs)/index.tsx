@@ -40,6 +40,7 @@ import { ScrollView } from "react-native";
 
 const H_PAD = 20;
 const COL_GAP = 12;
+const TEXT_H = 46;
 const SPINE_W = 9;
 const TAB_BAR_H = 84;
 const MAX_CONTENT_W = 430;
@@ -309,7 +310,7 @@ function DraggableItem({
     const col = idx % COL;
     return {
       x: marginH + col * (cardW + marginH),
-      y: row * (cardH + COL_GAP),
+      y: row * (cardH + TEXT_H + COL_GAP),
     };
   };
 
@@ -386,7 +387,7 @@ function DraggableItem({
       const absX = currentX + (cardW / 2);
       const absY = currentY + (cardH / 2);
       const targetCol = Math.min(COL - 1, Math.max(0, Math.round((absX - marginH) / (cardW + marginH))));
-      const targetRow = Math.max(0, Math.round(absY / (cardH + COL_GAP)));
+      const targetRow = Math.max(0, Math.round(absY / (cardH + TEXT_H + COL_GAP)));
       const targetIdx = Math.min(itemsLength.value - 1, targetRow * COL + targetCol);
 
       const currentIdx = positions.value[id];
@@ -447,7 +448,7 @@ function DraggableItem({
             {journal.title}
           </Text>
           <Text style={[styles.journalMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-            {journal.pageCount} {journal.pageCount === 1 ? "page" : "pages"} · {formatDate(journal.createdAt)}
+            {journal.pageCount} {Number(journal.pageCount) === 1 ? "page" : "pages"} · {formatDate(journal.createdAt)}
           </Text>
         </View>
       </Animated.View>
@@ -513,7 +514,7 @@ function DraggableGrid({
   }, [internalItems, onReorder]);
 
   const totalRows = Math.ceil(internalItems.length / COL);
-  const gridH = totalRows * (cardH + COL_GAP);
+  const gridH = totalRows * (cardH + TEXT_H + COL_GAP);
 
   return (
     <>
