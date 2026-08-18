@@ -1,3 +1,4 @@
+import "react-native-url-polyfill/auto";
 import { Feather } from "@expo/vector-icons";
 import {
   Inter_400Regular,

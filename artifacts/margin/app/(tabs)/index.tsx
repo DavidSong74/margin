@@ -7,10 +7,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Image,
   Modal,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -262,101 +262,10 @@ function EmptyState() {
   );
 }
 
-// ── LibraryGridItem (memoized FlatList cell) ──────────────────
 
-const LibraryGridItem = React.memo(function LibraryGridItem({
-  item,
-  cardW,
-  cardH,
-  colors,
-  onMenuPress,
-}: {
-  item: GridItem;
-  cardW: number;
-  cardH: number;
-  colors: ReturnType<typeof useColors>;
-  onMenuPress: (journal: JournalItem) => void;
-}) {
-  return (
-    <View style={{ marginBottom: COL_GAP }}>
-      {item.type === "new" ? (
-        <TouchableOpacity
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push("/journal/new");
-          }}
-          activeOpacity={0.7}
-        >
-          <NewJournalTile cardW={cardW} cardH={cardH} />
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            router.push({
-              pathname: "/journal/[id]",
-              params: {
-                id: item.journal.id,
-                title: item.journal.title,
-                isPrivate: String(item.journal.isPrivate),
-              },
-            });
-          }}
-          activeOpacity={0.82}
-        >
-          <View style={{ position: "relative" }}>
-            <JournalCover
-              journal={item.journal}
-              cardW={cardW}
-              cardH={cardH}
-            />
-            {/* 3-dot menu button — bottom-right of cover */}
-            <TouchableOpacity
-              style={styles.menuDotBtn}
-              onPress={(e) => {
-                e.stopPropagation();
-                Haptics.selectionAsync();
-                onMenuPress(item.journal);
-              }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Feather name="more-vertical" size={14} color="#fff" />
-            </TouchableOpacity>
-          </View>
-          <Text
-            style={[
-              styles.journalName,
-              {
-                color: colors.foreground,
-                fontFamily: "Inter_600SemiBold",
-              },
-            ]}
-            numberOfLines={1}
-          >
-            {item.journal.title}
-          </Text>
-          <Text
-            style={[
-              styles.journalMeta,
-              {
-                color: colors.mutedForeground,
-                fontFamily: "Inter_400Regular",
-              },
-            ]}
-          >
-            {item.journal.pageCount}{" "}
-            {item.journal.pageCount === 1 ? "page" : "pages"} ·{" "}
-            {formatDate(item.journal.createdAt)}
-          </Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-});
+
 
 // ── DraggableGrid ─────────────────────────────────────────────
-// New-Architecture-compatible drag-to-reorder grid using
-// react-native-reanimated + react-native-gesture-handler.
 
 interface DraggableGridProps {
   items: GridItem[];
@@ -364,9 +273,10 @@ interface DraggableGridProps {
   cardH: number;
   effectiveW: number;
   pb: number;
+  colors: ReturnType<typeof useColors>;
   ListHeader: React.ReactNode;
-  renderItem: (args: { item: GridItem }) => React.ReactNode;
   onReorder: (newItems: GridItem[]) => void;
+  onMenuPress: (journal: JournalItem) => void;
 }
 
 function DraggableGrid({
@@ -375,46 +285,34 @@ function DraggableGrid({
   cardH,
   effectiveW,
   pb,
+  colors,
   ListHeader,
-  renderItem,
   onReorder,
+  onMenuPress,
 }: DraggableGridProps) {
   const COL = 2;
   const MARGIN_H = (effectiveW - cardW * COL) / (COL + 1);
   const [orderedItems, setOrderedItems] = useState(items);
-  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
 
-  // Keep in sync when items prop changes externally (e.g., after load)
   useEffect(() => { setOrderedItems(items); }, [items]);
 
   const itemsLength = useSharedValue(orderedItems.length);
-  useEffect(() => {
-    itemsLength.value = orderedItems.length;
-  }, [orderedItems]);
+  useEffect(() => { itemsLength.value = orderedItems.length; }, [orderedItems]);
+
+  const scrollOffset = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => { scrollOffset.value = e.contentOffset.y; },
+  });
 
   function getPosition(idx: number) {
     const row = Math.floor(idx / COL);
     const col = idx % COL;
-    return {
-      x: MARGIN_H + col * (cardW + MARGIN_H),
-      y: row * (cardH + COL_GAP),
-    };
+    return { x: MARGIN_H + col * (cardW + MARGIN_H), y: row * (cardH + COL_GAP) };
   }
-
-  // Per-item drag state
-  const isActive = useSharedValue(false);
-  
-  const scrollOffset = useSharedValue(0);
-  const scrollHandler = useAnimatedScrollHandler({
-    onScroll: (e) => {
-      scrollOffset.value = e.contentOffset.y;
-    },
-  });
 
   function swapItems(fromIdx: number, toIdx: number) {
     if (fromIdx === toIdx) return;
     const newItems = [...orderedItems];
-    // Don't allow moving "new" card (always first)
     if (newItems[0]?.type === "new" && (fromIdx === 0 || toIdx === 0)) return;
     const tmp = newItems[fromIdx];
     newItems[fromIdx] = newItems[toIdx];
@@ -430,67 +328,103 @@ function DraggableGrid({
     const itemTY = useSharedValue(0);
     const zIndex = useSharedValue(1);
 
+    // ── "New journal" tile ──
+    if (item.type === "new") {
+      const newTap = Gesture.Tap().onEnd(() => {
+        runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
+        runOnJS(router.push)("/journal/new");
+      });
+      return (
+        <GestureDetector gesture={newTap}>
+          <Animated.View style={{ position: "absolute", left: pos.x, top: pos.y }}>
+            <View style={{ marginBottom: COL_GAP }}>
+              <NewJournalTile cardW={cardW} cardH={cardH} />
+            </View>
+          </Animated.View>
+        </GestureDetector>
+      );
+    }
+
+    // ── Journal card ──
+    const journal = item.journal;
+
+    const navigate = () => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      router.push({
+        pathname: "/journal/[id]",
+        params: { id: journal.id, title: journal.title, isPrivate: String(journal.isPrivate) },
+      });
+    };
+
+    const openMenu = () => {
+      Haptics.selectionAsync();
+      onMenuPress(journal);
+    };
+
+    // Quick tap → navigate. Long press activates pan → drag.
+    const tap = Gesture.Tap().maxDuration(400).onEnd(() => { runOnJS(navigate)(); });
     const pan = Gesture.Pan()
-      .activateAfterLongPress(250) // Reduced from 400ms to fix "only drags on second try"
+      .activateAfterLongPress(400)
       .onStart(() => {
         "worklet";
-        isActive.value = true;
         scale.value = withSpring(1.08);
         zIndex.value = 999;
-        runOnJS(setDraggingIdx)(index);
-        // haptic
         runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
       })
       .onUpdate((e) => {
         "worklet";
-        if (item.type === "new") return; // "new" card not draggable
         itemTX.value = e.translationX;
         itemTY.value = e.translationY;
       })
       .onEnd((e) => {
         "worklet";
-        isActive.value = false;
-        
-        // Calculate the drop target index on the UI thread
         const absX = pos.x + e.translationX + (cardW / 2);
-        const absY = pos.y + e.translationY + (cardH / 2) + scrollOffset.value;
-        
-        const col = Math.min(COL - 1, Math.max(0, Math.round((absX - MARGIN_H) / (cardW + MARGIN_H))));
-        const row = Math.max(0, Math.round(absY / (cardH + COL_GAP)));
-        
-        const targetIdx = Math.min(itemsLength.value - 1, row * COL + col);
-        
+        const absY = pos.y + e.translationY + (cardH / 2);
+        const targetCol = Math.min(COL - 1, Math.max(0, Math.round((absX - MARGIN_H) / (cardW + MARGIN_H))));
+        const targetRow = Math.max(0, Math.round(absY / (cardH + COL_GAP)));
+        const targetIdx = Math.min(itemsLength.value - 1, targetRow * COL + targetCol);
         itemTX.value = withSpring(0);
         itemTY.value = withSpring(0);
         scale.value = withSpring(1);
         zIndex.value = 1;
-        
         runOnJS(swapItems)(index, targetIdx);
-        runOnJS(setDraggingIdx)(null);
       });
 
+    // Race: first gesture to activate wins. Tap wins on quick press, pan wins after long hold.
+    const cardGesture = Gesture.Race(tap, pan);
+    // 3-dot menu: separate gesture so it never reaches cardGesture
+    const menuTap = Gesture.Tap().onEnd(() => { runOnJS(openMenu)(); });
+
     const animStyle = useAnimatedStyle(() => ({
-      transform: [
-        { translateX: itemTX.value },
-        { translateY: itemTY.value },
-        { scale: scale.value },
-      ],
+      transform: [{ translateX: itemTX.value }, { translateY: itemTY.value }, { scale: scale.value }],
       zIndex: zIndex.value,
     }));
 
-    // "new" card is not draggable
-    if (item.type === "new") {
-      return (
-        <View style={{ position: "absolute", left: pos.x, top: pos.y }}>
-          {renderItem({ item })}
-        </View>
-      );
-    }
-
     return (
-      <GestureDetector gesture={pan}>
+      <GestureDetector gesture={cardGesture}>
         <Animated.View style={[{ position: "absolute", left: pos.x, top: pos.y }, animStyle]}>
-          {renderItem({ item })}
+          <View style={{ marginBottom: COL_GAP }}>
+            <View style={{ position: "relative" }}>
+              <JournalCover journal={journal} cardW={cardW} cardH={cardH} />
+              <GestureDetector gesture={menuTap}>
+                <Animated.View
+                  style={styles.menuDotBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Feather name="more-vertical" size={14} color="#fff" />
+                </Animated.View>
+              </GestureDetector>
+            </View>
+            <Text
+              style={[styles.journalName, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}
+              numberOfLines={1}
+            >
+              {journal.title}
+            </Text>
+            <Text style={[styles.journalMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+              {journal.pageCount} {journal.pageCount === 1 ? "page" : "pages"} · {formatDate(journal.createdAt)}
+            </Text>
+          </View>
         </Animated.View>
       </GestureDetector>
     );
@@ -504,25 +438,26 @@ function DraggableGrid({
       {/* @ts-ignore React 19 typing issue */}
       <GestureHandlerRootView style={{ flex: 1 }}>
         <Animated.ScrollView
-        scrollEventThrottle={16}
-        onScroll={scrollHandler}
-        contentContainerStyle={{ paddingBottom: pb }}
-      >
-        {ListHeader}
-        <View style={{ height: gridH, position: "relative", marginHorizontal: 0 }}>
-          {orderedItems.map((item, index) => (
-            <DraggableItem
-              key={item.type === "new" ? "new" : item.journal.id}
-              item={item}
-              index={index}
-            />
-          ))}
-        </View>
-      </Animated.ScrollView>
-    </GestureHandlerRootView>
+          scrollEventThrottle={16}
+          onScroll={scrollHandler}
+          contentContainerStyle={{ paddingBottom: pb }}
+        >
+          {ListHeader}
+          <View style={{ height: gridH, position: "relative" }}>
+            {orderedItems.map((item, index) => (
+              <DraggableItem
+                key={item.type === "new" ? "new" : item.journal.id}
+                item={item}
+                index={index}
+              />
+            ))}
+          </View>
+        </Animated.ScrollView>
+      </GestureHandlerRootView>
     </>
   );
 }
+
 
 // ── Main screen ──────────────────────────────────────────────
 
@@ -686,8 +621,8 @@ export default function LibraryScreen() {
     () =>
       searchText.trim()
         ? journals.filter((j) =>
-            j.title.toLowerCase().includes(searchText.toLowerCase())
-          )
+          j.title.toLowerCase().includes(searchText.toLowerCase())
+        )
         : journals,
     [journals, searchText]
   );
@@ -710,18 +645,7 @@ export default function LibraryScreen() {
     setEditingTitle(false);
   }, []);
 
-  const renderItem = useCallback(
-    ({ item }: { item: GridItem }) => (
-      <LibraryGridItem
-        item={item}
-        cardW={cardW}
-        cardH={cardH}
-        colors={colors}
-        onMenuPress={handleMenuPress}
-      />
-    ),
-    [cardW, cardH, colors, handleMenuPress]
-  );
+
 
   // ── Context menu actions ──────────────────────────────────────
 
@@ -766,11 +690,11 @@ export default function LibraryScreen() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user) throw new Error("Not authenticated");
-        
+
         const FileSystem = await import("expo-file-system/legacy");
         const base64 = await FileSystem.readAsStringAsync(result.assets[0].uri, { encoding: "base64" });
         const storagePath = `${session.user.id}/${menuJournal.id}/cover.jpg`;
-        
+
         const { error: uploadError } = await supabase.storage
           .from("covers")
           .upload(storagePath, decode(base64), {
@@ -779,14 +703,14 @@ export default function LibraryScreen() {
           });
         if (uploadError) throw uploadError;
 
-        await supabase.from("journals").update({ 
-          cover_style: "image", 
-          cover_image_url: storagePath 
+        await supabase.from("journals").update({
+          cover_style: "image",
+          cover_image_url: storagePath
         }).eq("id", menuJournal.id);
-        
-        setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { 
-          ...j, 
-          coverStyle: "image", 
+
+        setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? {
+          ...j,
+          coverStyle: "image",
           coverImagePath: storagePath,
           coverImage: undefined
         } : j));
@@ -1016,8 +940,9 @@ export default function LibraryScreen() {
         cardH={cardH + 46}
         effectiveW={effectiveW}
         pb={pb}
+        colors={colors}
         ListHeader={ListHeader}
-        renderItem={renderItem}
+        onMenuPress={handleMenuPress}
         onReorder={(newData) => {
           const newJournals = newData.filter((d) => d.type === "journal").map((d) => d.journal);
           setJournals(newJournals);
@@ -1028,16 +953,17 @@ export default function LibraryScreen() {
           });
         }}
       />
-      
+
       {/* ── Journal context menu bottom sheet ── */}
       <Modal
         visible={menuJournal !== null}
         animationType="slide"
-        presentationStyle="pageSheet"
+        transparent={true}
         onRequestClose={closeMenu}
       >
+        <Pressable style={styles.sheetBackdrop} onPress={closeMenu} />
         {menuJournal && (
-          <View style={[styles.sheetRoot, { backgroundColor: colors.background }]}>
+          <View style={[styles.sheetRoot, { backgroundColor: colors.background, paddingBottom: insets.bottom + 16 }]}>
             {/* Handle bar */}
             <View style={styles.sheetHandle}>
               <View style={[styles.sheetHandleBar, { backgroundColor: colors.border }]} />
@@ -1115,7 +1041,7 @@ export default function LibraryScreen() {
                 ))}
               </View>
             </View>
-            
+
             <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
 
             <TouchableOpacity style={styles.sheetRow} onPress={handleChangeCoverPicture}>
@@ -1128,8 +1054,8 @@ export default function LibraryScreen() {
             <View style={[styles.sheetDivider, { backgroundColor: colors.border }]} />
 
             {/* ── Change date ── */}
-            <TouchableOpacity 
-              style={styles.sheetRow} 
+            <TouchableOpacity
+              style={styles.sheetRow}
               onPress={() => setShowDatePicker((p) => !p)}
             >
               <Feather name="calendar" size={18} color={colors.primary} />
@@ -1418,9 +1344,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
   sheetRoot: {
-    flex: 1,
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     paddingTop: 8,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    overflow: "hidden",
   },
   sheetHandle: {
     alignItems: "center",

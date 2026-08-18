@@ -1,4 +1,6 @@
 import "react-native-url-polyfill/auto";
+// Capture the native fetch reference BEFORE anything else can override it.
+const _nativeFetch = global.fetch;
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
@@ -75,11 +77,27 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+// On Android (especially Pixel / Android 14), the native fetch sometimes rejects
+// URL objects and non-string inputs. We capture the native fetch reference before
+// Supabase touches the global, then coerce every input to a plain string.
+const customFetch: typeof fetch = (input, init) => {
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : (input as Request).url;
+  return _nativeFetch(url, init);
+};
+
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: ChunkedSecureStore,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+  },
+  global: {
+    fetch: customFetch,
   },
 });
