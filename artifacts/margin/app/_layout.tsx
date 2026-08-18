@@ -29,6 +29,7 @@ import { supabase } from "@/lib/supabase";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { useColors } from "@/hooks/useColors";
 import { processCaptureQueue } from "@/lib/captureQueue";
+import { AnimatedSplashScreenV2 } from "@/components/AnimatedSplashScreenV2";
 
 LogBox.ignoreLogs(["expo-notifications: Android Push notifications"]);
 
@@ -215,6 +216,7 @@ export default function RootLayout() {
                   session={session}
                   initialized={sessionInitialized}
                 />
+                <AnimatedSplashScreenV2 />
               </AppLockGate>
             </GestureHandlerRootView>
           </QueryClientProvider>
