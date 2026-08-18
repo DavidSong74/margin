@@ -495,22 +495,16 @@ export default function JournalReaderScreen() {
 
     async function checkPrivacy() {
       try {
-        let privateJournal: boolean;
+        let privateJournal = isPrivateParam === "true";
 
-        if (isPrivateParam !== undefined) {
-          // O3: Use param from Library navigation — skip DB round trip
-          privateJournal = isPrivateParam === "true";
-        } else {
-          const { data, error } = await supabase
-            .from("journals")
-            .select("is_private")
-            .eq("id", journalId)
-            .single();
+        // Query database to verify privacy status and prevent deep-link parameter spoofing
+        const { data, error } = await supabase
+          .from("journals")
+          .select("is_private")
+          .eq("id", journalId)
+          .single();
 
-          if (error || !data) {
-            setPrivacyState("unlocked");
-            return;
-          }
+        if (!error && data) {
           privateJournal = data.is_private ?? false;
         }
 
@@ -529,7 +523,7 @@ export default function JournalReaderScreen() {
         }
 
         const result = await LocalAuthentication.authenticateAsync({
-          promptMessage: `Unlock "${title}"`,
+          promptMessage: `Unlock "${title || "Journal"}"`,
           fallbackLabel: "Use passcode",
         });
         if (result.success) {
@@ -537,9 +531,9 @@ export default function JournalReaderScreen() {
         } else {
           router.back();
         }
-      } catch {
-        // Never block the journal on an unexpected error
-        setPrivacyState("unlocked");
+      } catch (err) {
+        console.error("[JournalReader] checkPrivacy error:", err);
+        router.back();
       }
     }
 

@@ -350,11 +350,14 @@ export default function CaptureScreen() {
     const user = session?.user;
     if (!user) return;
 
-    const { count } = await supabase
+    const { data: maxPageData } = await supabase
       .from("pages")
-      .select("*", { count: "exact", head: true })
-      .eq("journal_id", journal_id);
-    const base = (count ?? 0) + 1;
+      .select("page_number")
+      .eq("journal_id", journal_id)
+      .order("page_number", { ascending: false })
+      .limit(1);
+    const maxPage = maxPageData?.[0]?.page_number ?? 0;
+    const base = maxPage + 1;
 
     setScreen("batch_uploading");
     setBatchProgress({ current: 0, total: result.assets.length });
