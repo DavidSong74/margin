@@ -1,6 +1,6 @@
 import "react-native-url-polyfill/auto";
 // Capture the native fetch reference BEFORE anything else can override it.
-const _nativeFetch = fetch;
+const _nativeFetch = global.fetch;
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
