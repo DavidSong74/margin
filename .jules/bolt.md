@@ -1,0 +1,3 @@
+## 2026-08-20 - [Hermes String Reallocation Bottleneck]
+**Learning:** String concatenation using the `+=` operator inside loops causes severe string reallocation performance overhead specific to the mobile Hermes JavaScript engine. This is particularly problematic for tasks like assembling large strings across multiple chunks, such as re-assembling chunked authentication tokens from SecureStore.
+**Action:** Always push string fragments to an array and combine them with `.join('')` instead of repeatedly using the `+=` operator when building large strings in loops, especially in React Native/Expo code running on the Hermes engine.
