@@ -18,13 +18,17 @@ const ChunkedSecureStore = {
       if (!countStr) return SecureStore.getItemAsync(key);
 
       const count = parseInt(countStr, 10);
-      let result = "";
+
+      // ⚡ Bolt: Optimizing string concatenation by pushing to an array and using .join('')
+      // This mitigates severe string reallocation performance overhead in the mobile Hermes JS engine
+      // Expected impact: Faster re-assembly of large auth tokens, reducing UI blocking during boot
+      const chunks: string[] = [];
       for (let i = 0; i < count; i++) {
         const chunk = await SecureStore.getItemAsync(`${key}_chunk_${i}`);
         if (!chunk) return null;
-        result += chunk;
+        chunks.push(chunk);
       }
-      return result;
+      return chunks.join("");
     } catch {
       return null;
     }
