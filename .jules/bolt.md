@@ -1,0 +1,3 @@
+## 2024-08-21 - [Optimize String Concatenation in Mobile Apps using Hermes JS engine]
+**Learning:** Specific to React Native mobile apps using the Hermes JS engine, string reallocations created using `+=` inside large loops present significant memory allocation performance overhead compared to alternatives.
+**Action:** Always prefer initializing a string array, pushing fragments to the array, and then combining with `.join('')` to prevent overhead caused by continuous string memory reallocations.
