@@ -1,0 +1,4 @@
+## 2024-08-22 - [Search Path Hijacking]
+**Vulnerability:** A `SECURITY DEFINER` function `public.find_user_by_email` set `search_path = public, auth`, allowing attackers to override built-in functions via the mutable `public` schema (search path hijacking).
+**Learning:** `SET search_path = ''` safely hardens `SECURITY DEFINER` functions but requires strict `pg_catalog.` prefixing for built-ins. Some functions like `trim` and `substring` are syntactic sugar and require invoking `btrim` and regular function signatures (`substring(string, start, length)`), respectively. Also, `regexp_replace` only replaces matched parts, requiring care when appending other substrings to avoid duplication.
+**Prevention:** Always use `SET search_path = ''` for `SECURITY DEFINER` functions, schema-qualify all function calls properly avoiding syntactic sugar, and verify string replacements don't leave unexpected remnants.
