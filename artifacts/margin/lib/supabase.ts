@@ -18,13 +18,14 @@ const ChunkedSecureStore = {
       if (!countStr) return SecureStore.getItemAsync(key);
 
       const count = parseInt(countStr, 10);
-      let result = "";
+      const chunks = [];
       for (let i = 0; i < count; i++) {
         const chunk = await SecureStore.getItemAsync(`${key}_chunk_${i}`);
         if (!chunk) return null;
-        result += chunk;
+        // Optimize string concatenation for Hermes JS engine using array joins
+        chunks.push(chunk);
       }
-      return result;
+      return chunks.join("");
     } catch {
       return null;
     }
