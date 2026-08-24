@@ -55,22 +55,22 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = ''
 AS $$
   SELECT 
     fc.id AS comment_id, 
     fc.user_id,
-    (regexp_replace(u.email, '^(.)[^@]+', '\1***') || '@' || split_part(u.email, '@', 2))::text AS author_email,
+    (pg_catalog.left(u.email, 1) || '***@' || pg_catalog.split_part(u.email, '@', 2))::text AS author_email,
     fc.comment_text, 
     fc.created_at
-  FROM feed_comments fc
+  FROM public.feed_comments fc
   JOIN auth.users u ON u.id = fc.user_id
-  JOIN shared_entries se ON se.id = fc.entry_id
+  JOIN public.shared_entries se ON se.id = fc.entry_id
   WHERE fc.entry_id = p_entry_id
     AND (
       se.user_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM friendships f
+        SELECT 1 FROM public.friendships f
         WHERE f.status = 'accepted'
           AND ((f.requester_id = se.user_id AND f.addressee_id = auth.uid())
             OR (f.addressee_id = se.user_id AND f.requester_id = auth.uid()))

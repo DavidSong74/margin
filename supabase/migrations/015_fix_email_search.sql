@@ -7,11 +7,11 @@ CREATE OR REPLACE FUNCTION public.find_user_by_email(p_email text)
 RETURNS TABLE (user_id uuid, user_email text)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = ''
 AS $$
 DECLARE
   v_caller_id uuid := auth.uid();
-  v_target_email text := lower(trim(p_email));
+  v_target_email text := pg_catalog.lower(pg_catalog.btrim(p_email));
 BEGIN
   -- Require caller authentication
   IF v_caller_id IS NULL THEN
@@ -19,16 +19,16 @@ BEGIN
   END IF;
 
   -- Require valid email query length
-  IF v_target_email IS NULL OR length(v_target_email) < 3 THEN
+  IF v_target_email IS NULL OR pg_catalog.length(v_target_email) < 3 THEN
     RETURN;
   END IF;
 
   RETURN QUERY
   SELECT 
     u.id AS user_id,
-    (regexp_replace(u.email, '^(.)[^@]+', '\1***') || '@' || split_part(u.email, '@', 2))::text AS user_email
+    (pg_catalog.left(u.email, 1) || '***@' || pg_catalog.split_part(u.email, '@', 2))::text AS user_email
   FROM auth.users u
-  WHERE lower(u.email) = v_target_email
+  WHERE pg_catalog.lower(u.email) = v_target_email
     AND u.id <> v_caller_id
   LIMIT 1;
 END;
