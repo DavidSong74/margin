@@ -2,13 +2,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
-// NOTE: expo-notifications is not supported in Expo Go SDK 53+.
-// Import lazily and catch errors so the app doesn't crash in Expo Go.
-let Notifications: typeof import("expo-notifications") | null = null;
-try {
-  Notifications = require("expo-notifications");
-} catch {}
-
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Sharing from "expo-sharing";
 import Constants from "expo-constants";
@@ -32,11 +25,22 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+// NOTE: expo-notifications is not supported in Expo Go SDK 53+.
+// Import lazily and catch errors so the app doesn't crash in Expo Go.
+let Notifications: typeof import("expo-notifications") | null = null;
+// Constants is imported below
+if (Constants.executionEnvironment !== "storeClient") {
+  try {
+    Notifications = require("expo-notifications");
+  } catch {}
+}
+
 import { useColors } from "@/hooks/useColors";
 import { useTheme, type ThemeOption } from "@/hooks/useTheme";
 import { supabase } from "@/lib/supabase";
 import { COVER_COLORS } from "@/constants/colors";
 import { exportJournalToPdf } from "@/lib/pdfExport";
+import { logEvent } from "@/lib/eventLogger";
 
 // ─── Reusable primitives ─────────────────────────────────────────────────────
 
@@ -107,6 +111,7 @@ function Row({
       <TouchableOpacity
         style={styles.row}
         onPress={() => {
+          logEvent("Profile", "PRESS_ROW", { label });
           Haptics.selectionAsync();
           onPress?.();
         }}

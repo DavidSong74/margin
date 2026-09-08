@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useTheme } from "@/hooks/useTheme";
 import { supabase } from "@/lib/supabase";
+import { logEvent } from "@/lib/eventLogger";
 
 export default function TabLayout() {
   const colors = useColors();
@@ -70,6 +71,11 @@ export default function TabLayout() {
 
   return (
     <Tabs
+      screenListeners={{
+        tabPress: (e) => {
+          logEvent("TabBar", "PRESS_TAB", { target: e.target?.split("-")[0] });
+        },
+      }}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,

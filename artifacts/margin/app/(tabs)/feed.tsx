@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { logEvent } from "@/lib/eventLogger";
 import { useFocusEffect } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
 import {
@@ -93,7 +94,10 @@ const FeedCard = React.memo(function FeedCard({
 
       {/* Transcription text */}
       <TouchableOpacity
-        onPress={() => isTruncated && onToggleExpand(entry.entry_id)}
+        onPress={() => {
+          logEvent("Feed", "PRESS_TOGGLE_EXPAND", { entryId: entry.entry_id });
+          isTruncated && onToggleExpand(entry.entry_id);
+        }}
         activeOpacity={isTruncated ? 0.7 : 1}
       >
         <Text
@@ -129,7 +133,10 @@ const FeedCard = React.memo(function FeedCard({
       {/* Actions */}
       <View style={styles.cardActions}>
         <TouchableOpacity
-          onPress={() => onLike(entry.entry_id)}
+          onPress={() => {
+            logEvent("Feed", "PRESS_LIKE", { entryId: entry.entry_id, wasLiked: entry.viewer_liked });
+            onLike(entry.entry_id);
+          }}
           style={styles.actionBtn}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
@@ -151,7 +158,10 @@ const FeedCard = React.memo(function FeedCard({
         </TouchableOpacity>
 
         <TouchableOpacity
-          onPress={() => onOpenComments(entry.entry_id)}
+          onPress={() => {
+            logEvent("Feed", "PRESS_OPEN_COMMENTS", { entryId: entry.entry_id });
+            onOpenComments(entry.entry_id);
+          }}
           style={styles.actionBtn}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >

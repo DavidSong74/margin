@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { logEvent } from "@/lib/eventLogger";
 import { router } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -60,7 +61,8 @@ const SearchResultItem = React.memo(function SearchResultItem({
   return (
     <TouchableOpacity
       style={[styles.resultRow, { borderBottomColor: colors.border }]}
-      onPress={() =>
+      onPress={() => {
+        logEvent("Search", "PRESS_SEARCH_RESULT", { pageId: item.page_id, journalId: item.journal_id, pageNumber: item.page_number });
         router.push({
           pathname: "/journal/[id]",
           params: {
@@ -68,8 +70,8 @@ const SearchResultItem = React.memo(function SearchResultItem({
             title: item.journal_title,
             initial_page: String(item.page_number),
           },
-        })
-      }
+        });
+      }}
       activeOpacity={0.7}
     >
       <View style={styles.resultMeta}>
@@ -123,6 +125,7 @@ export default function SearchScreen() {
     setLoading(true);
     debounceRef.current = setTimeout(async () => {
       try {
+        logEvent("Search", "SEARCH_EXECUTED", { query: trimmed });
         const { data, error } = await supabase.rpc("search_pages", { query: trimmed });
         if (error) throw error;
         setResults((data as SearchResult[]) ?? []);

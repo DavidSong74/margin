@@ -19,7 +19,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Margin needs camera access to photograph your journal pages.",
         "NSPhotoLibraryUsageDescription": "Margin needs photo library access to select journal cover images.",
-        "NSPhotoLibraryAddUsageDescription": "Margin saves captured journal pages to your photo library."
+        "NSPhotoLibraryAddUsageDescription": "Margin saves captured journal pages to your photo library.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -29,10 +30,6 @@
         "backgroundColor": "#faf7f2"
       },
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO",
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",

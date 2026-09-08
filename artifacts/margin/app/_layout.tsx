@@ -15,7 +15,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import Constants from "expo-constants";
 import { useFonts } from "expo-font";
-import * as Notifications from "expo-notifications";
+// import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -34,6 +34,19 @@ import { AnimatedSplashScreenV2 } from "@/components/AnimatedSplashScreenV2";
 
 LogBox.ignoreLogs(["expo-notifications: Android Push notifications"]);
 
+// ── Global crash logging ───────────────────────────────────────────────────────
+// Catches JS errors and unhandled promise rejections that would otherwise
+// silently crash the app on Android.
+
+const _originalErrorHandler = ErrorUtils.getGlobalHandler();
+ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+  console.error(`[CRASH][Global] isFatal=${isFatal} error=${error?.message}`, error?.stack);
+  if (_originalErrorHandler) {
+    _originalErrorHandler(error, isFatal);
+  }
+});
+
+
 SplashScreen.preventAutoHideAsync();
 
 // ── Push token registration ────────────────────────────────────────────────────
@@ -45,6 +58,13 @@ async function registerPushToken(userId: string) {
   try {
     // Expo Go dropped Android push support in SDK 53; skip to avoid the console error
     if (Constants.executionEnvironment === "storeClient") return;
+
+    let Notifications;
+    try {
+      Notifications = require("expo-notifications");
+    } catch {
+      return;
+    }
 
     const { status } = await Notifications.getPermissionsAsync();
     if (status !== "granted") return;
@@ -209,9 +229,11 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <SafeAreaProvider>
-        <ErrorBoundary>
+        <ErrorBoundary onError={(error, stackTrace) => {
+            console.error(`[CRASH][ErrorBoundary] ${error.message}`, stackTrace);
+          }}>
           <QueryClientProvider client={queryClient}>
-            <GestureHandlerRootView>
+            <GestureHandlerRootView style={{ flex: 1 }}>
               <AppLockGate>
                 <RootLayoutNav
                   session={session}

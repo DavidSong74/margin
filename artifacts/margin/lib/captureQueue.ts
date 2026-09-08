@@ -72,6 +72,9 @@ async function uploadQueuedItem(
     .from("journal_pages")
     .upload(thumbPath, decode(thumbBase64), { contentType: "image/jpeg" });
 
+  // Clean up temporary thumbnail file from local cache
+  FileSystem.deleteAsync(thumbnail.uri, { idempotent: true }).catch(() => {});
+
   const { error: insertErr } = await supabase.from("pages").insert({
     id: pageId,
     journal_id: item.journalId,
