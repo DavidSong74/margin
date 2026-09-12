@@ -19,7 +19,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Margin needs camera access to photograph your journal pages.",
         "NSPhotoLibraryUsageDescription": "Margin needs photo library access to select journal cover images.",
-        "NSPhotoLibraryAddUsageDescription": "Margin saves captured journal pages to your photo library."
+        "NSPhotoLibraryAddUsageDescription": "Margin saves captured journal pages to your photo library.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -64,6 +65,12 @@
         "projectId": "502baed6-cc42-4602-8e21-c66f93931d62"
       }
     },
-    "owner": "davidsong74"
+    "owner": "davidsong74",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/502baed6-cc42-4602-8e21-c66f93931d62"
+    }
   }
 }

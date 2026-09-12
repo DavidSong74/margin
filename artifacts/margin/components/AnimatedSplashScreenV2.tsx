@@ -191,7 +191,7 @@ export function AnimatedSplashScreenV2({ onAnimationFinish }: AnimatedSplashScre
           ]}
         >
           <View style={styles.subRule} />
-          <Text style={styles.subtitleText}>A Journal for Thought</Text>
+          <Text style={styles.subtitleText}>Journal for Thought</Text>
           <View style={styles.subRule} />
         </Animated.View>
       </View>

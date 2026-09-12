@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { logEvent } from "@/lib/eventLogger";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { decode } from "base64-arraybuffer";
@@ -249,6 +250,7 @@ function EmptyState() {
       <TouchableOpacity
         style={[styles.emptyBtn, { backgroundColor: colors.primary }]}
         onPress={() => {
+          logEvent("Library", "PRESS_START_FIRST_JOURNAL");
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           router.push("/journal/new");
         }}
@@ -279,6 +281,7 @@ interface DraggableItemProps {
   cardH: number;
   marginH: number;
   colors: ReturnType<typeof useColors>;
+  index: number;
   onDragEnd: (newPositions: Record<string, number>) => void;
   onMenuPress: (journal: JournalItem) => void;
 }
@@ -294,6 +297,7 @@ function DraggableItem({
   cardH,
   marginH,
   colors,
+  index,
   onDragEnd,
   onMenuPress,
 }: DraggableItemProps) {
@@ -315,7 +319,8 @@ function DraggableItem({
   };
 
   const currentIndex = useDerivedValue(() => {
-    return positions.value[id] ?? 0;
+    const posMap = positions.value;
+    return posMap[id] ?? index;
   });
 
   const targetPosition = useDerivedValue(() => {
@@ -324,10 +329,15 @@ function DraggableItem({
 
   // ── "New journal" tile ──
   if (item.type === "new") {
-    const newTap = Gesture.Tap().onEnd(() => {
-      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
-      runOnJS(router.push)("/journal/new");
-    });
+    const handleNewJournalPress = () => {
+      try {
+        logEvent("Library", "PRESS_NEW_JOURNAL_TILE");
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push("/journal/new");
+      } catch (err) {
+        console.error("[Library] Error navigating to new journal:", err);
+      }
+    };
     
     const animStyle = useAnimatedStyle(() => ({
       transform: [
@@ -338,13 +348,11 @@ function DraggableItem({
     }));
 
     return (
-      <GestureDetector gesture={newTap}>
-        <Animated.View style={[{ position: "absolute", left: 0, top: 0 }, animStyle]}>
-          <View style={{ marginBottom: COL_GAP }}>
-            <NewJournalTile cardW={cardW} cardH={cardH} />
-          </View>
-        </Animated.View>
-      </GestureDetector>
+      <Animated.View style={[{ position: "absolute", left: 0, top: 0 }, animStyle]}>
+        <TouchableOpacity activeOpacity={0.7} onPress={handleNewJournalPress} style={{ marginBottom: COL_GAP }}>
+          <NewJournalTile cardW={cardW} cardH={cardH} />
+        </TouchableOpacity>
+      </Animated.View>
     );
   }
 
@@ -352,19 +360,28 @@ function DraggableItem({
   const journal = item.journal;
 
   const navigate = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push({
-      pathname: "/journal/[id]",
-      params: { id: journal.id, title: journal.title, isPrivate: String(journal.isPrivate) },
-    });
+    try {
+      logEvent("Library", "PRESS_JOURNAL_COVER", { journalId: journal.id, title: journal.title });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      router.push({
+        pathname: "/journal/[id]",
+        params: { id: journal.id, title: journal.title, isPrivate: String(journal.isPrivate) },
+      });
+    } catch (err) {
+      console.error("[Library] Error navigating to journal:", err);
+    }
   };
 
   const openMenu = () => {
-    Haptics.selectionAsync();
-    onMenuPress(journal);
+    try {
+      logEvent("Library", "PRESS_THREE_DOT_MENU", { journalId: journal.id, title: journal.title });
+      Haptics.selectionAsync();
+      onMenuPress(journal);
+    } catch (err) {
+      console.error("[Library] Error opening menu:", err);
+    }
   };
 
-  const tap = Gesture.Tap().maxDuration(400).onEnd(() => { runOnJS(navigate)(); });
   const pan = Gesture.Pan()
     .activateAfterLongPress(400)
     .onStart(() => {
@@ -414,9 +431,6 @@ function DraggableItem({
       runOnJS(onDragEnd)(positions.value);
     });
 
-  const cardGesture = Gesture.Race(tap, pan);
-  const menuTap = Gesture.Tap().onEnd(() => { runOnJS(openMenu)(); });
-
   const animStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: isDragging.value ? dragX.value : withSpring(targetPosition.value.x) },
@@ -427,32 +441,34 @@ function DraggableItem({
   }));
 
   return (
-    <GestureDetector gesture={cardGesture}>
-      <Animated.View style={[{ position: "absolute", left: 0, top: 0 }, animStyle]}>
-        <View style={{ marginBottom: COL_GAP }}>
-          <View style={{ position: "relative" }}>
-            <JournalCover journal={journal} cardW={cardW} cardH={cardH} />
-            <GestureDetector gesture={menuTap}>
-              <Animated.View
+    <Animated.View style={[{ position: "absolute", left: 0, top: 0 }, animStyle]}>
+      <View style={{ marginBottom: COL_GAP }}>
+        <GestureDetector gesture={pan}>
+          <Animated.View>
+            <TouchableOpacity activeOpacity={0.9} onPress={navigate} style={{ position: "relative" }}>
+              <JournalCover journal={journal} cardW={cardW} cardH={cardH} />
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={openMenu}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 style={styles.menuDotBtn}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Feather name="more-vertical" size={14} color="#fff" />
-              </Animated.View>
-            </GestureDetector>
-          </View>
-          <Text
-            style={[styles.journalName, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}
-            numberOfLines={1}
-          >
-            {journal.title}
-          </Text>
-          <Text style={[styles.journalMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
-            {journal.pageCount} {Number(journal.pageCount) === 1 ? "page" : "pages"} · {formatDate(journal.createdAt)}
-          </Text>
-        </View>
-      </Animated.View>
-    </GestureDetector>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Animated.View>
+        </GestureDetector>
+        <Text
+          style={[styles.journalName, { color: colors.foreground, fontFamily: "Inter_600SemiBold" }]}
+          numberOfLines={1}
+        >
+          {journal.title}
+        </Text>
+        <Text style={[styles.journalMeta, { color: colors.mutedForeground, fontFamily: "Inter_400Regular" }]}>
+          {journal.pageCount} {Number(journal.pageCount) === 1 ? "page" : "pages"} · {formatDate(journal.createdAt)}
+        </Text>
+      </View>
+    </Animated.View>
   );
 }
 
@@ -518,22 +534,21 @@ function DraggableGrid({
 
   return (
     <>
-      {/* @ts-ignore React 19 typing issue */}
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <Animated.ScrollView
-          scrollEventThrottle={16}
-          onScroll={scrollHandler}
-          contentContainerStyle={{ paddingBottom: pb }}
-        >
+      <Animated.ScrollView
+        scrollEventThrottle={16}
+        onScroll={scrollHandler}
+        contentContainerStyle={{ paddingBottom: pb }}
+      >
           {ListHeader}
           <View style={{ height: gridH, position: "relative" }}>
-            {internalItems.map((item) => {
+            {internalItems.map((item, index) => {
               const id = item.type === "new" ? "new" : item.journal.id;
               return (
                 <DraggableItem
                   key={id}
                   item={item}
                   id={id}
+                  index={index}
                   positions={positions}
                   itemsLength={itemsLength}
                   cardW={cardW}
@@ -547,7 +562,6 @@ function DraggableGrid({
             })}
           </View>
         </Animated.ScrollView>
-      </GestureHandlerRootView>
     </>
   );
 }
@@ -734,6 +748,7 @@ export default function LibraryScreen() {
   // ── Render helpers ─────────────────────────────────────────
 
   const handleMenuPress = useCallback((journal: JournalItem) => {
+    logEvent("Library", "MENU_SHEET_OPEN", { journalId: journal.id, title: journal.title });
     setMenuJournal(journal);
     setEditTitleText(journal.title);
     setEditingTitle(false);
@@ -743,12 +758,16 @@ export default function LibraryScreen() {
 
   // ── Context menu actions ──────────────────────────────────────
 
-  const closeMenu = useCallback(() => setMenuJournal(null), []);
+  const closeMenu = useCallback(() => {
+    logEvent("Library", "MENU_SHEET_CLOSE");
+    setMenuJournal(null);
+  }, []);
 
   // Save a new title
   const handleSaveTitle = useCallback(async () => {
     if (!menuJournal) return;
     const trimmed = editTitleText.trim();
+    logEvent("Library", "PRESS_SAVE_TITLE", { journalId: menuJournal.id, newTitle: trimmed });
     if (!trimmed || trimmed === menuJournal.title) { closeMenu(); return; }
     setSavingAction(true);
     await supabase.from("journals").update({ title: trimmed }).eq("id", menuJournal.id);
@@ -760,6 +779,7 @@ export default function LibraryScreen() {
   // Change cover color
   const handleChangeCoverColor = useCallback(async (hex: string) => {
     if (!menuJournal) return;
+    logEvent("Library", "PRESS_CHANGE_COVER_COLOR", { journalId: menuJournal.id, hex });
     await supabase.from("journals").update({ cover_style: "solid", cover_color: hex }).eq("id", menuJournal.id);
     setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { ...j, coverStyle: "solid", coverColor: hex } : j));
     closeMenu();
@@ -768,6 +788,7 @@ export default function LibraryScreen() {
   // Change cover picture
   const handleChangeCoverPicture = useCallback(async () => {
     if (!menuJournal) return;
+    logEvent("Library", "PRESS_CHANGE_COVER_PICTURE", { journalId: menuJournal.id });
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       Alert.alert("Permission Required", "Photo library access is required to choose a cover photo.");
@@ -821,6 +842,7 @@ export default function LibraryScreen() {
   const handleToggleLock = useCallback(async () => {
     if (!menuJournal) return;
     const newValue = !menuJournal.isPrivate;
+    logEvent("Library", "PRESS_TOGGLE_LOCK", { journalId: menuJournal.id, newValue });
     await supabase.from("journals").update({ is_private: newValue }).eq("id", menuJournal.id);
     setJournals((prev) => prev.map((j) => j.id === menuJournal.id ? { ...j, isPrivate: newValue } : j));
     closeMenu();
@@ -829,6 +851,7 @@ export default function LibraryScreen() {
   // Soft delete
   const handleDeleteJournal = useCallback(() => {
     if (!menuJournal) return;
+    logEvent("Library", "PRESS_DELETE_JOURNAL", { journalId: menuJournal.id, title: menuJournal.title });
     Alert.alert(
       "Move to Recently Deleted?",
       `"${menuJournal.title}" will be kept for 30 days, then permanently deleted. You can restore it from Profile → Deleted Journals.`,
@@ -853,6 +876,7 @@ export default function LibraryScreen() {
   // Export
   const handleExportJournal = useCallback(async () => {
     if (!menuJournal) return;
+    logEvent("Library", "PRESS_EXPORT_JOURNAL", { journalId: menuJournal.id, title: menuJournal.title });
     closeMenu();
     const { data: pages } = await supabase
       .from("pages")
@@ -895,6 +919,7 @@ export default function LibraryScreen() {
           <TouchableOpacity
             style={[styles.avatar, { backgroundColor: colors.primary }]}
             onPress={() => {
+              logEvent("Library", "PRESS_INBOX_AVATAR");
               Haptics.selectionAsync();
               setInboxVisible(true);
             }}
@@ -1031,7 +1056,7 @@ export default function LibraryScreen() {
       <DraggableGrid
         items={gridData}
         cardW={cardW}
-        cardH={cardH + 46}
+        cardH={cardH}
         effectiveW={effectiveW}
         pb={pb}
         colors={colors}
@@ -1070,7 +1095,7 @@ export default function LibraryScreen() {
               >
                 {menuJournal.title}
               </Text>
-              <TouchableOpacity onPress={closeMenu} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <TouchableOpacity onPress={() => { logEvent("Library", "PRESS_SHEET_CLOSE_X"); closeMenu(); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Feather name="x" size={22} color={colors.mutedForeground} />
               </TouchableOpacity>
             </View>
@@ -1100,7 +1125,7 @@ export default function LibraryScreen() {
             ) : (
               <TouchableOpacity
                 style={styles.sheetRow}
-                onPress={() => setEditingTitle(true)}
+                onPress={() => { logEvent("Library", "PRESS_EDIT_TITLE"); setEditingTitle(true); }}
               >
                 <Feather name="edit-2" size={18} color={colors.primary} />
                 <Text style={[styles.sheetRowLabel, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>
@@ -1150,7 +1175,7 @@ export default function LibraryScreen() {
             {/* ── Change date ── */}
             <TouchableOpacity
               style={styles.sheetRow}
-              onPress={() => setShowDatePicker((p) => !p)}
+              onPress={() => { logEvent("Library", "PRESS_CHANGE_DATE"); setShowDatePicker((p) => !p); }}
             >
               <Feather name="calendar" size={18} color={colors.primary} />
               <Text style={[styles.sheetRowLabel, { color: colors.foreground, fontFamily: "Inter_400Regular" }]}>

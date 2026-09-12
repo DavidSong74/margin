@@ -26,6 +26,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CropEditor } from "@/components/CropEditor";
 import { supabase } from "@/lib/supabase";
 import { enqueueCapture } from "@/lib/captureQueue";
+import { logEvent } from "@/lib/eventLogger";
 
 // ── Pre-computed Base64 map for fast decoding ─────────────
 
@@ -229,6 +230,9 @@ export default function CaptureScreen() {
       .from("journal_pages")
       .upload(thumbPath, decode(thumbBase64), { contentType: "image/jpeg" });
 
+    // Clean up temporary thumbnail file from device storage
+    FileSystem.deleteAsync(thumbnail.uri, { idempotent: true }).catch(() => {});
+
     const { error: insertErr } = await supabase.from("pages").insert({
       id: pageId,
       journal_id,
@@ -364,24 +368,19 @@ export default function CaptureScreen() {
 
     let successCount = 0;
     let failCount = 0;
-    const BATCH_SIZE = 2;
 
     try {
-      for (let i = 0; i < result.assets.length; i += BATCH_SIZE) {
-        const chunk = result.assets.slice(i, i + BATCH_SIZE);
-        await Promise.all(
-          chunk.map(async (asset, idx) => {
-            try {
-              await uploadSinglePhoto(asset.uri, base + i + idx, user);
-              successCount++;
-            } catch (err) {
-              console.error(`[capture] Failed to upload photo ${i + idx}:`, err);
-              failCount++;
-            }
-          })
-        );
+      for (let i = 0; i < result.assets.length; i++) {
+        const asset = result.assets[i];
+        try {
+          await uploadSinglePhoto(asset.uri, base + i, user);
+          successCount++;
+        } catch (err) {
+          console.error(`[capture] Failed to upload photo ${i}:`, err);
+          failCount++;
+        }
         setBatchProgress({
-          current: Math.min(i + BATCH_SIZE, result.assets.length),
+          current: i + 1,
           total: result.assets.length,
         });
       }

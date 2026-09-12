@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { logEvent } from "@/lib/eventLogger";
 import { useFocusEffect, router } from "expo-router";
 import React, { useCallback, useState } from "react";
 import {
@@ -83,6 +84,7 @@ export default function ReviewScreen() {
 
   async function handleNext() {
     if (!page || advancing) return;
+    logEvent("Review", "PRESS_NEXT_ENTRY", { pageId: page.page_id, journalId: page.journal_id });
     setAdvancing(true);
     try {
       await supabase
@@ -202,7 +204,8 @@ export default function ReviewScreen() {
       <View style={[styles.actions, { paddingBottom: pb + 16 }]}>
         <TouchableOpacity
           style={[styles.ghostBtn, { borderColor: colors.border }]}
-          onPress={() =>
+          onPress={() => {
+            logEvent("Review", "PRESS_VIEW_IN_JOURNAL", { journalId: page.journal_id, pageNumber: page.page_number });
             router.push({
               pathname: "/journal/[id]",
               params: {
@@ -210,8 +213,8 @@ export default function ReviewScreen() {
                 title: page.journal_title,
                 initial_page: String(page.page_number),
               },
-            })
-          }
+            });
+          }}
           activeOpacity={0.7}
         >
           <Feather name="external-link" size={15} color={colors.foreground} />

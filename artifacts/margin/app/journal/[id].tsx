@@ -36,6 +36,7 @@ import { useColors } from "@/hooks/useColors";
 import { useReaderFontSize } from "@/hooks/useReaderFontSize";
 import { supabase } from "@/lib/supabase";
 import type { PendingCorrection } from "@/lib/database.types";
+import { logEvent } from "@/lib/eventLogger";
 
 const H_PAD = 20;
 const MAX_CONTENT_W = 430;
@@ -670,6 +671,7 @@ export default function JournalReaderScreen() {
   const handleDeleteCurrentPage = useCallback(() => {
     const page = pages[currentPage];
     if (!page) return;
+    logEvent("JournalDetail", "PRESS_DELETE_PAGE", { pageId: page.id, pageNumber: page.pageNumber });
     Alert.alert(
       `Delete page ${page.pageNumber}?`,
       "Available to restore for 30 days in Settings → Deleted Pages.",
@@ -855,6 +857,7 @@ export default function JournalReaderScreen() {
   // ── Retry failed transcription ───────────────────────────────
 
   const handleRetryTranscription = useCallback(async () => {
+    logEvent("JournalDetail", "PRESS_RETRY_TRANSCRIPTION", { currentPage });
     const page = pages[currentPage];
     if (!page) return;
 
@@ -888,6 +891,7 @@ export default function JournalReaderScreen() {
 
   const handleCropPress = useCallback(
     (pageId: string, imagePath: string, signedUrl: string) => {
+      logEvent("JournalDetail", "PRESS_CROP", { pageId });
       setCropState({ pageId, imagePath, uri: signedUrl });
     },
     []
@@ -980,6 +984,7 @@ export default function JournalReaderScreen() {
   // ── Restore original image ───────────────────────────────────
 
   const handleResetCrop = useCallback(async (pageId: string) => {
+    logEvent("JournalDetail", "PRESS_RESET_CROP", { pageId });
     const page = pages.find((p) => p.id === pageId);
     if (!page?.originalImagePath) return;
 
@@ -1059,6 +1064,7 @@ export default function JournalReaderScreen() {
   // ── N8 + S3: Share current page ──────────────────────────────
 
   const handleShare = useCallback(() => {
+    logEvent("JournalDetail", "PRESS_SHARE", { currentPage });
     const page = pages[currentPage];
     Alert.alert("Share", undefined, [
       ...(page?.transcriptionText
@@ -1095,6 +1101,7 @@ export default function JournalReaderScreen() {
   }, []);
 
   const handleShareToFeed = useCallback(async () => {
+    logEvent("JournalDetail", "PRESS_SHARE_TO_FEED", { selectedPageIds: selectedPageIds.length });
     const pageId = selectedPageIds[0];
     if (!pageId) return;
 
@@ -1131,6 +1138,7 @@ export default function JournalReaderScreen() {
   // ── S3: Share text selection snippet to Feed ──────────────────
 
   const handleShareSelection = useCallback(async () => {
+    logEvent("JournalDetail", "PRESS_SHARE_SELECTION");
     if (!textSelection) return;
     const page = pages[currentPage];
     const snippet = (page?.transcriptionText ?? "")
@@ -1305,7 +1313,7 @@ export default function JournalReaderScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => router.back()}
+            onPress={() => { logEvent("JournalDetail", "PRESS_BACK"); router.back(); }}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Feather name="arrow-left" size={24} color={colors.foreground} />
